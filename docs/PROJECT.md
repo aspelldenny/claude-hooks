@@ -118,3 +118,13 @@ Rust binary `claude-hooks` replace toàn bộ với:
 - Bootstrap commit này CHỈ ship Cargo skeleton + this PROJECT.md
 - Full Workflow v2.1 doctrine port (CLAUDE.md + docs/RULES.md + .claude/agents + .tools/runtime-env.allowlist + .github/workflows/ci.yml + hooks scripts + skills symlink) sẽ ship **POST-PILOT** sau khi `advisory-inbox` ship Phase 1-4 xong + retrospective forge v2.2 nếu cần
 - Em hoặc Sếp KHÔNG bắt đầu phiếu code trong repo này TRƯỚC khi pilot xong
+
+---
+
+## Resume brief from tarot orchestrator (2026-06-05)
+
+**Gate ĐÃ MỞ:** pilot `advisory-inbox` ship Phase 1-4 (CHANGELOG P012) + retrospective viết xong (`~/sos-kit/docs/retro/WORKFLOW_V2.2_RETRO_advisory-inbox.md` + v2.3). Điều kiện "đợi pilot + retro" đã thoả → repo này **bắt đầu code được** với doctrine v2.2/v2.3.
+
+**NHƯNG không gấp (Quản đốc + Sếp chốt 2026-06-05):** 4 Bash hook nó định thay đang **CHẠY TỐT** — `block-unsafe-merge` chặn đúng PR #603 (security-surface chưa review), `session-banner` cảnh báo advisory stale. Đây là **refactor đồng bộ/maintainability**, KHÔNG fix đau hiện tại → ưu tiên thấp hơn Tier 0 (cho tool đã ship chạy) + Tier 1 (bash bootstrap installer) + Tier 1.5 (adopt-poisoned-repo flow). claude-hooks nằm **Tier 2**, build khi gom "bộ kit hoàn chỉnh".
+
+**Wiring tarot (Phase 4):** replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh`. Brief tarot-side: `~/tarot/docs/BACKLOG.md §🦀 Rust toolchain`.
