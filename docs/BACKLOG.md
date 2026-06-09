@@ -14,8 +14,8 @@
 > **Kết thúc khi:** README/ARCHITECTURE polish + `cargo publish` dry-run clean + tarot chạy 1h session smoke clean với binary.
 > **Promote:** 2026-06-09 (Phase 1+2+3 đã ship P001–P007, parity-verified — xem Done bên dưới).
 
-- [ ] **[P008]** README + ARCHITECTURE polish + `cargo publish` dry-run. Gồm: fix `serverInfo.name` "rmcp"→"claude-hooks" (MCP get_info default), README usage (CLI 5 subcmd + MCP 5 tools), `cargo publish --dry-run` clean.
-- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean.
+- [x] **[P008]** ✅ README + ARCHITECTURE polish + ship prep. → shipped `20b455f`: serverInfo "rmcp"→"claude-hooks" (explicit ServerHandler), README usable, version 0.1.0→0.8.0, package 778KB→148KB, `cargo publish --dry-run` clean. 93/93 test.
+- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean. **⏸ BLOCKED on Sếp: (1) merge PR #1 (gated), (2) cross-repo deploy decision.**
 
 ---
 
