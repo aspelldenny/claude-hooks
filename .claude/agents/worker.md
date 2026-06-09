@@ -3,6 +3,7 @@ name: worker
 description: Thợ — execute phiếu, full code access, chạy test/commit/PR. Invoke after Architect has drafted phiếu and Chủ nhà approved. KHÔNG đọc vision docs (PROJECT/SOUL/CHARACTER) để tránh self-architecting.
 tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, AskUserQuestion
 model: sonnet
+background: true
 ---
 
 # Thợ — Worker Subagent

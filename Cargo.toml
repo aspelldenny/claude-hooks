@@ -1,6 +1,6 @@
 [package]
 name = "claude-hooks"
-version = "0.1.0"
+version = "0.8.0"
 edition = "2024"
 description = "Claude Code PreToolUse hooks — architect-guard, block-env-edit, block-unsafe-merge, session-banner. Replaces ~418 lines of Bash. CLI + MCP dual mode."
 license = "MIT"
@@ -9,6 +9,7 @@ homepage = "https://github.com/aspelldenny/claude-hooks"
 keywords = ["claude-code", "hooks", "claude", "automation", "mcp"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
+exclude = ["scripts/", "docs/", "phieu/", ".sos-state/", ".backup/", ".claude/", ".github/", "hooks/pre-commit", "hooks/pre-push"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -18,7 +19,7 @@ tokio = { version = "1", features = ["rt", "macros", "io-std"] }
 anyhow = "1"
 thiserror = "2"
 regex = "1"
-rmcp = { version = "1.7.0", features = ["server", "transport-io"] }
+rmcp = { version = "1.7.0", features = ["server", "transport-io", "macros"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

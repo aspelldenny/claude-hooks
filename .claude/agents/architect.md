@@ -3,6 +3,7 @@ name: architect
 description: Kiến trúc sư — đọc docs only, viết phiếu với Task 0 anchors. KHÔNG có Bash/Grep/Edit để giảm hallucination về code. Invoke when need to write phiếu/ticket/plan for a feature.
 tools: Read, Write, Glob, TaskCreate, TaskUpdate, TaskList, AskUserQuestion
 model: opus
+background: true
 ---
 
 # Kiến trúc sư — Architect Subagent
