@@ -34,13 +34,10 @@ pub fn read_payload() -> HookPayload {
 }
 
 pub const ALLOW: i32 = 0;
-/// Exit code 2 = block (reason -> stderr). P002+ use this.
-#[allow(dead_code)]
+/// Exit code 2 = block (reason -> stderr).
 pub const BLOCK: i32 = 2;
 
 /// Block with reason printed to stderr. Returns BLOCK so caller can return it.
-/// Used by P002+ hook implementations.
-#[allow(dead_code)]
 pub fn block(reason: &str) -> i32 {
     eprintln!("{reason}");
     BLOCK

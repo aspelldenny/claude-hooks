@@ -12,13 +12,44 @@ The binary name is `claude-hooks`; subcommands are kebab-case.
 
 | Subcommand | Clap variant | Status | Port target |
 |---|---|---|---|
-| `architect-guard` | `Cmd::ArchitectGuard` | stub (P001) | P002 |
+| `architect-guard` | `Cmd::ArchitectGuard` | real (P002) | — |
 | `block-env-edit` | `Cmd::BlockEnvEdit` | stub (P001) | P003 |
 | `block-unsafe-merge` | `Cmd::BlockUnsafeMerge` | stub (P001) | P004 |
 | `session-banner` | `Cmd::SessionBanner` | stub (P001) | P005 |
 | `serve` | `Cmd::Serve` | stub (P001) | P006 |
 
 Kebab-case names are auto-derived by clap from PascalCase variants (verified P001: no `#[command(name=...)]` needed for clap 4.6).
+
+### `architect-guard` (P002 — real implementation)
+
+Ports `scripts/architect-guard.sh` 1:1. Fires on every `Read`/`Glob` PreToolUse call.
+
+**Pipeline (8 steps):**
+
+1. Resolve repo root from `CLAUDE_PROJECT_DIR` env (fallback: cwd). All internal paths bind to this root.
+2. **Marker gate:** if `.sos-state/architect-active` does not exist → `ALLOW` (not running as Architect).
+3. Parse path from stdin JSON: `tool_input.file_path` (priority), fallback `tool_input.pattern`.
+4. No path parsed → `ALLOW` (fail-open).
+5. Strip leading `./`.
+6. Path ends with `.md` → `ALLOW` (docs are Architect's domain).
+7. **Forbidden pattern check** — `BLOCK` if any match:
+
+   | Group | Pattern | Rust check |
+   |---|---|---|
+   | Source dirs (prefix) | `src/*`, `lib/*`, `app/*`, `pkg/*` | `starts_with` |
+   | Source dirs (segment) | `*/src/*`, `*/lib/*`, `*/app/*`, `*/pkg/*` | `contains` |
+   | Test dirs (prefix) | `tests/*`, `test/*`, `__tests__/*` | `starts_with` |
+   | Test dirs (segment) | `*/tests/*`, `*/test/*` | `contains` |
+   | Build artifacts (prefix only) | `node_modules/*`, `target/*`, `dist/*`, `build/*`, `.next/*`, `.nuxt/*`, `.svelte-kit/*` | `starts_with` |
+   | Extensions | `*.rs *.ts *.tsx *.js *.jsx *.py *.go *.java *.cpp *.c *.h *.hpp` | `ends_with` |
+
+   Default (no match) → `ALLOW`.
+
+8. Blocked → `io::block(msg)` (writes message to stderr, returns exit 2).
+
+**Exit codes:** `0` (ALLOW), `2` (BLOCK — see exit-code table above).
+
+**Block message** (stderr, verbatim oracle): `🚫 Architect envelope violation` + path (original, pre-strip) + instructions for Task 0 anchor workflow.
 
 ### stdin-JSON Harness (`src/io.rs`)
 
@@ -57,7 +88,7 @@ tests/
 
 `serve` subcommand: stdio JSON-RPC server (rmcp 1.7). P001 = stub only (prints `"serve: not yet implemented (P006)"` to stderr, exits 0). Full implementation in P006: `why_blocked` debug tool for Quản đốc/Sếp sessions.
 
-## Data Flow (P001 scaffold)
+## Data Flow
 
 ```
 Claude Code PreToolUse trigger
@@ -65,11 +96,11 @@ Claude Code PreToolUse trigger
      -> clap parse subcommand
      -> dispatch to hook fn
         -> read_payload() [fail-open]
-        -> stub logic (return ALLOW)
-     -> process::exit(0)
+        -> hook logic (marker gate + path match, or stub ALLOW)
+     -> process::exit(code)
 ```
 
-P002+ replace stub logic with real Bash-parity logic; harness wiring unchanged.
+`architect-guard` (P002): real logic. `block-env-edit` (P003+), `block-unsafe-merge` (P004+), `session-banner` (P005+): still stubs returning ALLOW. Harness wiring unchanged.
 
 ## Bash Reference (oracle)
 

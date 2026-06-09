@@ -2,6 +2,14 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.2.0 — P002 architect-guard port — 2026-06-09
+
+- **P002**: Port `architect-guard` subcmd 1:1 from `scripts/architect-guard.sh`.
+  - `src/hooks/mod.rs`: replaced stub `architect_guard()` with 8-step logic: `CLAUDE_PROJECT_DIR` repo-root resolution, marker gate (`.sos-state/architect-active`), stdin path parse (`file_path` priority / `pattern` fallback), fail-open (no path → ALLOW), `./` strip, `.md` allow, forbidden pattern check (source dirs, test dirs, build artifacts, extensions), block with verbatim oracle message.
+  - `src/io.rs`: removed `#[allow(dead_code)]` from `BLOCK` and `block()` — now used by `architect_guard`.
+  - `tests/cli.rs`: 6 new P002 fire-test fixtures (P057 verify-cò). Isolation via `CLAUDE_PROJECT_DIR` env pointing to unique temp dir per test (no real `.sos-state/` touched).
+  - Docs Gate (Tầng 1 — security-surface): `docs/ARCHITECTURE.md` updated (architect-guard status stub→real, forbidden set, marker gate, exit semantics, pipeline detail).
+
 ## v0.1.0 — P001 scaffold CLI — 2026-06-09
 
 - **P001**: Scaffold CLI 5-subcommand + stdin-JSON harness + exit-code convention.
