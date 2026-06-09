@@ -8,15 +8,15 @@
 
 ---
 
-## 🔥 Active sprint: Phase 4 — Ship
+## ✅ Phase 4 — Ship — DONE (2026-06-09)
 
-> **Mục tiêu:** đóng gói + wire bản Rust vào tarot, thay 4 Bash hook gốc.
-> **Kết thúc khi:** README/ARCHITECTURE polish + `cargo publish` dry-run clean + tarot chạy 1h session smoke clean với binary.
-> **Promote:** 2026-06-09 (Phase 1+2+3 đã ship P001–P007, parity-verified — xem Done bên dưới).
+> **Mục tiêu (đạt):** đóng gói + wire bản Rust vào tarot, thay 4 Bash hook gốc.
+> **Kết quả:** P008 ship-prep ✅ · P010 architect-guard true parity ✅ · P009 wire-tarot ✅ (superseded by tarot P345 — 3/4 hook swapped live). cargo publish dry-run clean, version 0.9.0. **Dự án claude-hooks: shippable + adopted.**
+> Open hardening còn lại (low-pri, không gấp): **P011** (F-007 path-traversal) — xem Open backlog.
 
 - [x] **[P008]** ✅ README + ARCHITECTURE polish + ship prep. → shipped `20b455f`: serverInfo "rmcp"→"claude-hooks" (explicit ServerHandler), README usable, version 0.1.0→0.8.0, package 778KB→148KB, `cargo publish --dry-run` clean. 93/93 test.
 - [x] **[P010]** ✅ `architect-guard` TRUE parity tarot (fix **F-004**) — tool_name dispatch + Write/Edit guard (allowlist `docs/ticket/P*-*.md`, deny `TICKET_TEMPLATE.md`) + Read/Glob superset (prisma/sql/path) + 2 message + sync oracle. → shipped `86446f1` (104 test, **parity 12/12 vs tarot bash oracle**). Marker GIỮ `.sos-state/` (F-005 defer).
-- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean. **⏸ BLOCKED on Sếp: (1) merge PR #1 (gated), (2) cross-repo deploy decision. P010 nên xong trước (true parity architect-guard).**
+- [x] **[P009]** ✅ CLOSED — **superseded bởi tarot P345** (PR #630). Việc wire do tarot tự sở hữu, không phải claude-hooks chạy. Live: tarot swap **3/4 hook** → binary (`session-banner`, `architect-guard`, `block-env-edit`); `block-unsafe-merge` CỐ Ý giữ bash (F-006 fail-open vắng-PATH — chờ shim, pattern đã có README). claude-hooks không còn việc cho P009.
 
 ---
 
@@ -32,6 +32,7 @@
 
 ## 💡 Open backlog (chưa thuộc sprint)
 
+- [ ] **[P011]** Hardening F-007 — `is_allowed_for_write` (+cân nhắc `is_forbidden_for_read`) deny-fast path chứa `..` TRƯỚC allowlist. Low-pri (xác suất thật thấp — Claude Code gửi path normalized; KHÔNG có gì đang gãy). Divergence-có-chủ-đích khỏi oracle (improve, không port faithful) → sync 3 nơi: binary `is_allowed_for_write` + `scripts/architect-guard.sh` + feed tarot oracle. ~30 phút.
 - [ ] **[SCOPE-DECISION — Sếp quyết]** **Hook canonical set đã mọc thêm từ vision (2026-05-28).** PROJECT.md nhắm **4 hook tarot** (architect-guard, block-env-edit, block-unsafe-merge, session-banner). Từ đó sos-kit canonical thêm: `orchestrator-guard.sh` · `no-code-on-default.sh` (P050) · `block-env-commit.sh` (P052) · `check-case-collision.sh` · pre-commit chain `[1/7]→[7/7]`. **Quyết định cần:** (a) Phase 1-4 giữ nguyên 4 hook gốc (MVP parity), hook mới = **Phase 5 follow-on** — em nghiêng cái này (giữ vision bounded, đừng nhắm bia di động); HAY (b) mở scope ngay = port cả bộ hiện tại. Bản Bash mới đã có sẵn trong `scripts/` (adopt copy) làm reference khi tới lượt.
 
 ---
