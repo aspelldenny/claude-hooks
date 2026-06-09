@@ -6,18 +6,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/session-start-banner.sh\""
+            "command": "claude-hooks session-banner"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Glob",
+        "matcher": "Read|Glob|Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/architect-guard.sh\""
+            "command": "claude-hooks architect-guard"
           }
         ]
       },
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/block-env-edit.sh\""
+            "command": "claude-hooks block-env-edit"
           },
           {
             "type": "command",
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/block-unsafe-merge.sh\""
+            "command": "claude-hooks block-unsafe-merge"
           }
         ]
       }
