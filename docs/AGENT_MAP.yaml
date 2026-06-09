@@ -1,0 +1,25 @@
+# AGENT_MAP — scan-generated DRAFT (sos map). status: draft_needs_review.
+#
+# SOUND half (auto): the surfaces + edit-paths below are REAL dirs/files in THIS repo, coarse-
+#   grouped by directory pattern. This is NOT the tarot example (no "map nói dối").
+# PARTIAL half (YOU): set load_bearing (true|false) + write blast for each — the scan can't
+#   judge importance (product knowledge). Split coarse regions into semantic surfaces as you
+#   refine (e.g. routes_handlers → auth / ratings / privacy).
+#
+# Validator: doctor validate-map --map docs/AGENT_MAP.yaml (every path must exist).
+version: 1
+status: draft_needs_review
+generated_by: "sos map (scan)"
+
+surfaces:
+  frontend:
+    load_bearing: true                # NEEDS_JUDGMENT — confirm: true=architect reads deep, false=leaf. Default true = safe (over-read beats miss-blast).
+    edit:
+      - templates
+    blast: "TODO: what breaks if this changes — describe blast radius (you)."
+
+never_default_read:
+  - docs/CHANGELOG.md
+  - docs/DISCOVERIES.md
+  - docs/BACKLOG.md
+  - docs/ticket/archive/**

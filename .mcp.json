@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "doctor": {
+      "_comment": "sos-kit mechanical gate. Our own Rust tool — wire via PATH. Install: cargo install --path ~/doctor.",
+      "command": "doctor",
+      "args": ["serve"]
+    }
+  }
+}

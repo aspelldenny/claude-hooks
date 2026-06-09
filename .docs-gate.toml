@@ -1,0 +1,21 @@
+docs_dir = "docs"
+changelog = "../CHANGELOG.md"
+changelog_max_age_days = 1
+changelog_staged = false
+rules = []
+staleness = []
+doc_structure = []
+count_check = []
+cross_doc = []
+
+[architecture]
+enabled = true
+file = "ARCHITECTURE.md"
+required_sections = 0
+required_non_empty = []
+
+[ticket]
+ticket_dir = "docs/ticket"
+type_pattern = ""
+valid_types = []
+exclude_files = []

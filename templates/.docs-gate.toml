@@ -1,0 +1,49 @@
+# Reference template for sos-kit-style projects.
+# Copy to repo root as .docs-gate.toml, then tune for your layout.
+# Generated from docs-gate v0.1.0 init + curated for canonical sos-kit layout.
+#
+# Schema: flat-string v0.1.0 — do NOT use [[trigger]] table syntax (not valid in v0.1.0).
+
+# Directory where your main docs live.
+docs_dir = "docs"
+
+# Path to your changelog file (relative to repo root).
+# Common variants:
+#   changelog = "CHANGELOG.md"          # root-level (sos-kit convention)
+#   changelog = "docs/CHANGELOG.md"     # docs-nested variant
+changelog = "CHANGELOG.md"
+
+# How many days old the changelog entry can be before docs-gate complains.
+changelog_max_age_days = 1
+
+# Only check changelog entries that are staged (recommended for pre-commit).
+changelog_staged = true
+
+# Leave the following arrays empty unless you know what you need.
+# docs-gate v0.1.0 extension hooks — advanced users only.
+rules = []
+staleness = []
+doc_structure = []
+count_check = []
+cross_doc = []
+
+[architecture]
+# Set enabled = true once you have a dedicated architecture doc.
+# Point `file` to the path relative to repo root.
+# Required sections are checked by heading name (H2 level).
+# Convention for sos-kit-style projects: keep PROJECT.md, SOUL.md as
+# vision docs; use LAYERS.md or ARCHITECTURE.md for architecture.
+enabled = false
+file = "ARCHITECTURE.md"
+required_sections = 0
+required_non_empty = []
+
+[ticket]
+# Path to your phiếu / ticket directory (relative to docs_dir).
+# For sos-kit projects using the phiếu workflow: ticket_dir = "ticket"
+# which resolves to docs/ticket/.
+ticket_dir = "ticket"
+type_pattern = ""
+valid_types = []
+# Files to exclude from ticket checks (legacy or template files).
+exclude_files = []

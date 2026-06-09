@@ -1,8 +1,8 @@
 # PROJECT — claude-hooks
 
-> **Status:** Bootstrap (2026-05-28). Cargo skeleton + vision only.
-> **Full setup deferred:** post-pilot retrospective of `advisory-inbox` (Workflow v2.1 pilot, ETA ~3 days). At that point: port v2.1 doctrine + agents + skills symlink + CI workflow from sos-kit golden template (which itself updates from pilot lessons).
-> **Workflow v2.1 spec:** `~/sos-kit/docs/WORKFLOW_V2.1.md` (durable doctrine).
+> **Status:** Kit-adopted (2026-06-09) — `sos adopt` hạ full sos-kit spine (agents/hooks/phieu/skills/gates) vào repo. **GATE MỞ, code được** (pilot advisory-inbox + retro v2.2/v2.3 xong). `src/main.rs` vẫn skeleton 3-dòng → Phase 1 bắt đầu từ `docs/BACKLOG.md`.
+> **Workflow doctrine:** `~/sos-kit/docs/WORKFLOW_V2.2.md` (single-source). Repo-level contract: `CLAUDE.md`.
+> **Scope drift note (2026-06-09):** vision dưới đây nhắm 4 hook tarot (2026-05-28); sos-kit canonical đã mọc thêm (orchestrator-guard, no-code-on-default P050, block-env-commit P052, check-case-collision). Phase 1-4 GIỮ 4 hook gốc; bộ mới = Phase 5 follow-on — xem `docs/BACKLOG.md` Open backlog SCOPE-DECISION (Sếp quyết).
 
 ---
 

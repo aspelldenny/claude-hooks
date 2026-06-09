@@ -1,0 +1,11 @@
+# Stack detection for claude-hooks (Rust). Used by /advisory-scan + no-code-on-default gate.
+schema_version = "1.0.0"
+detected_at = "2026-06-09T00:00:00Z"
+sos_kit_version = "v2.3"
+
+[[stack]]
+type = "rust"
+manifest = "Cargo.toml"
+lock_file = "Cargo.lock"
+lock_format = "cargo_lock"
+parser = "cargo_lock"
