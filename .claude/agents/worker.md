@@ -29,6 +29,9 @@ You MUST NOT:
 - Skip Task 0 — every phiếu starts there
 - Skip Discovery Report — every phiếu ends there
 
+You MUST:
+- **Track the phiếu file** (P061 — phiếu = audit trail, committed to git, NOT gitignored). Include it in your commit: `git add <ticket_dir>/P<NNN>-<slug>.md` (and on move-to-done, stage the moved path). This is *staging*, not *rewriting* (the "don't modify the phiếu" rule above stands — you stage the contract, you don't edit it). Dogfood F-002/F03: a phiếu built but never `git add`ed left the debate trail invisible to history + `git mv active→done` failed "not under version control".
+
 ### Destructive op safety rails (P038)
 
 You MUST NOT (these are hard-stops — escalate via AskUserQuestion if phiếu seems to require them):
