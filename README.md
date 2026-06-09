@@ -106,6 +106,16 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
 
 Fail-open by default (all hooks except `block-unsafe-merge`). `block-unsafe-merge` is **fail-CLOSED**: `gh` unavailable or empty diff → block.
 
+> ⚠️ **Deployment caveat — keep the binary on `PATH`.** If `claude-hooks` is **not installed** (e.g. a fresh machine that hasn't run your setup script), a hook command like `claude-hooks block-unsafe-merge` resolves to *command-not-found* → shell exit `127`, which the harness treats as non-blocking (allow). That silently turns the **fail-CLOSED** `block-unsafe-merge` gate **fail-OPEN** *before any code runs*. The binary cannot self-defend against its own absence — guard it at the wiring layer.
+>
+> **Recommended for high-stakes (fail-CLOSED) hooks** — wrap the command in a presence-check shim so absence fails CLOSED:
+> ```bash
+> #!/usr/bin/env bash
+> command -v claude-hooks >/dev/null 2>&1 || { echo "BLOCKED: claude-hooks not on PATH — run your dev-setup script" >&2; exit 2; }
+> exec claude-hooks block-unsafe-merge "$@"
+> ```
+> Point `.claude/settings.json` at the shim instead of the bare binary, or keep the Bash hook for that one gate until the shim is in place. Lower-stakes fail-open hooks (architect-guard, block-env-edit, session-banner) don't need this.
+
 ## Environment variables
 
 `claude-hooks` reads no `.env` file — it is a stateless CLI binary. Two optional environment variables affect behavior; both are read at runtime via `std::env::var` and default safely when unset:
