@@ -200,4 +200,25 @@ Grep tìm `docs/CHANGELOG.md`, nhưng repo này (và CLAUDE.md DOCS GATE) để 
 
 ---
 
-<!-- Quản đốc: append F-NNN khi gặp ma sát mới. F-001..003 = workflow sos-kit; F-004+ = binary parity-gap (dogfood). Format: triệu chứng → evidence (cite line) → đề xuất fix. -->
+## F-007 — `is_allowed_for_write` path-traversal: allowlist bypass qua `../`
+
+**Severity:** Low-Medium (defense-in-depth gap trong security guard; thực tế thấp vì Claude Code gửi path normalized)
+**Phát hiện:** `/security-review` PR #2 (Giám sát, 2026-06-09) — advisory observation, KHÔNG phải INV flag (verdict APPROVE)
+**Loại:** Security-hardening — diverge oracle (oracle cũng dính → fix phải đồng bộ 3 nơi).
+
+**Triệu chứng:** `is_allowed_for_write` (Write/Edit allowlist của architect-guard, thêm ở P010) cho qua path có `../` traversal nếu nó khớp pattern phiếu:
+- Input `docs/ticket/P010-x.md/../../CLAUDE.md` → bắt đầu `docs/ticket/P`, chứa `-`, kết `.md` → **allowlist PASS** → Architect ghi được `CLAUDE.md` trá hình phiếu.
+
+**Evidence:** `src/hooks/mod.rs::is_allowed_for_write` — check `strip_prefix("docs/ticket/P")` + `contains('-')` + `ends_with(".md")`, KHÔNG reject `..`. **Faithful với bash oracle** (`case docs/ticket/P*-*.md)` glob cũng match path traversal) → cả `~/claude-hooks/scripts/architect-guard.sh` + `~/tarot/scripts/architect-guard.sh` đều dính.
+
+**Mitigating:** Claude Code PreToolUse gửi path đã normalize trong thực tế → khả năng thấp. Nhưng đây là 1 GÁC — defense-in-depth đáng làm.
+
+**Đề xuất fix (phiếu hardening MỚI — gọi tạm P011, ĐỒNG BỘ 3 nơi):**
+- `is_allowed_for_write`: deny-fast nếu `p.contains("..")` TRƯỚC khi check allowlist (binary).
+- Đồng bộ guard `..` vào `scripts/architect-guard.sh` (claude-hooks oracle) + feed tarot update `~/tarot/scripts/architect-guard.sh`.
+- Cân nhắc áp luôn cho `is_forbidden_for_read` (path traversal đọc source cũng nên chặn) — Sếp/Architect quyết scope.
+- ⚠️ Đây là divergence-có-chủ-đích khỏi oracle hiện tại (hardening) — KHÔNG phải port faithful; cần ghi rõ trong phiếu là "improve oracle, sync downstream".
+
+---
+
+<!-- Quản đốc: append F-NNN khi gặp ma sát mới. F-001..003 = workflow sos-kit; F-004+ = binary parity-gap/hardening (dogfood + review). Format: triệu chứng → evidence (cite line) → đề xuất fix. -->
