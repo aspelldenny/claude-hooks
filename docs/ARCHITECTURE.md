@@ -15,7 +15,7 @@ The binary name is `claude-hooks`; subcommands are kebab-case.
 | `architect-guard` | `Cmd::ArchitectGuard` | real (P002) | — |
 | `block-env-edit` | `Cmd::BlockEnvEdit` | real (P003) | — |
 | `block-unsafe-merge` | `Cmd::BlockUnsafeMerge` | real (P004) | — |
-| `session-banner` | `Cmd::SessionBanner` | stub (P001) | P005 |
+| `session-banner` | `Cmd::SessionBanner` | real (P005) | — |
 | `serve` | `Cmd::Serve` | stub (P001) | P006 |
 
 Kebab-case names are auto-derived by clap from PascalCase variants (verified P001: no `#[command(name=...)]` needed for clap 4.6).
@@ -71,6 +71,43 @@ Ports `scripts/block-env-edit.sh` 1:1. Fires on every `Edit`/`Write` PreToolUse 
 **Exit codes:** `0` (ALLOW), `2` (BLOCK).
 
 **Block message** (stderr, verbatim oracle L46-59): `⛔ BLOCKED: Edit/Write tới <full-path> bị chặn.` + secret-leak rationale + valid alternatives + override instructions.
+
+### `session-banner` (P005 — real implementation)
+
+Ports `scripts/session-start-banner.sh` 1:1. Fires on `SessionStart`. Renders an informational banner from file/git state.
+
+**Key differences from the 3 block hooks:**
+- **Reads stdout** (`println!`), NOT stderr. Banner is displayed to Sếp at session start.
+- **ALWAYS exit 0** — render hook, informational. Any failure (no BACKLOG, fs error, git fail) → fail-open, silent. This is the **OPPOSITE** of `block_unsafe_merge` (fail-CLOSED). Do NOT change to fail-closed.
+- **Does NOT read stdin** — does not call `read_payload()`. Renders from file/git state (oracle never `cat`s stdin).
+
+**Render pipeline (10 steps):**
+
+1. Resolve repo root from `CLAUDE_PROJECT_DIR` env (fallback: cwd). All paths joined to root via `PathBuf::join` (no real `chdir`).
+2. Read `docs/BACKLOG.md` — missing → `return ALLOW` (silent).
+3. `find_sprint_block(content)` — find first `^## .*Active sprint` header (fallback: first `^## ` with `fallback_used=true`). No `^## ` → `return ALLOW` (silent).
+4. `count_items(block)` — count `^- [ ]` (open) and `^- [x]` (done, lowercase x only).
+5. **Main banner** (stdout, verbatim oracle L58-71): `━`×60 lines, `🏠 Sếp's project — Active sprint status`, sprint block (first 25 lines), sprint count, optional fallback note.
+6. **Doc size warn** (oracle L73-92): check `docs/CHANGELOG.md`, `docs/DISCOVERIES.md`, `CHANGELOG.md` for > 40960 bytes. `doc_size_warns([(rel_path, bytes)])` → `📏 Doc size warning:` + 4-space indented lines (verbatim oracle L85: `⚠️  {doc} ({kb}k > 40k threshold) — gọi thợ trim…`).
+7. **Phiếu cleanup nudge** (oracle L94-138): scan `docs/ticket/` (fallback `phieu/active/`) for `P*.md` with non-placeholder `Approved by Chủ nhà:` line. Run `git branch --merged main` via `Command::new("git")` + args vec (NOT `sh -c`) → check if any merged branch matches `/{phieu_id}-` → `🧹 Cleanup nudge:` + 4-space indented nudges.
+8. **Advisory staleness** (oracle L140-171, only if `docs/security/advisory-inbox.md` exists): read `.advisory-scan-state`, parse `"last_scan_at"` JSON or legacy raw ISO. `staleness_days(iso, now_epoch)` (injected epoch) → `staleness_category` → Critical (🚨 >= 7 days) / Warn (⚠️  3-6 days) / Silent (0-2 days or negative).
+9. **Orchestrator contract + Architect Rule 0** (oracle L173-188, verbatim including bug F-001 — see below).
+10. `return ALLOW`.
+
+**Date computation:** manual ISO→epoch (Howard Hinnant days-from-civil, ~10 lines, public domain). No `chrono`/`time` dep. `staleness_days(iso, now_epoch)` takes injected `now_epoch` for deterministic unit tests. Verified: `2026-06-09T00:00:00Z` → 1780963200 matches `date -j -f "%Y-%m-%dT%H:%M:%SZ"`.
+
+**Git shelling:** `git branch --merged main` via `std::process::Command::new("git").args([…])`. Fail → empty (silent skip nudge). NOT `sh -c`.
+
+**Bug F-001 (verbatim port, do NOT fix here):** Oracle L178 `Marker:` line is missing `touch .sos-state/worker-active`. Port doctrine requires verbatim copy; fix must go upstream to sos-kit canonical `.sh` + orchestrator.md + ORCHESTRATION.md simultaneously. Text now lives in 2 places: `scripts/session-start-banner.sh` and `src/hooks/mod.rs`.
+
+**Exit codes:** `0` (ALLOW) only — never exits 2.
+
+**Pure helpers (unit-testable, no fs/git/clock):**
+- `find_sprint_block(backlog: &str) -> Option<(String, String, bool)>`
+- `count_items(block: &str) -> (usize, usize)`
+- `staleness_days(iso: &str, now_epoch: i64) -> Option<i64>`
+- `staleness_category(days: i64) -> Staleness`
+- `doc_size_warns(docs: &[(&str, u64)]) -> Vec<String>`
 
 ### `block-unsafe-merge` (P004 — real implementation)
 
@@ -158,7 +195,7 @@ Claude Code PreToolUse trigger
      -> process::exit(code)
 ```
 
-`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005+): still stub returning ALLOW. Harness wiring unchanged.
+`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). Harness wiring unchanged for all 3 block hooks; session-banner does NOT call `read_payload()`.
 
 ## Bash Reference (oracle)
 

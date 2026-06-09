@@ -21,13 +21,12 @@
 
 ---
 
-## 🎯 Next sprint: Phase 2 — Advanced 2 hook
+## ✅ Phase 2 DONE — Advanced 2 hook
 
-> **Trigger:** Phase 1 xong (CLI scaffold + 2 hook parity).
-> **Theme:** port 2 hook phức tạp (gh API + render).
+> **Shipped:** P004 block-unsafe-merge + P005 session-banner. Phase 2 complete.
 
-- [ ] **[P004]** `block-unsafe-merge` subcmd — port `scripts/block-unsafe-merge.sh` (137 dòng): `gh pr diff` capture + security-surface regex + APPROVE sentinel check. Lane: Tầng 1 (security-surface). Reference: `block-unsafe-merge.sh:102-106` sentinel grep.
-- [ ] **[P005]** `session-banner` subcmd — port `scripts/session-start-banner.sh` (108 dòng): render sprint + advisory staleness + runtime preflight cho SessionStart.
+- [x] **[P004]** ✅ `block-unsafe-merge` subcmd — port `scripts/block-unsafe-merge.sh` (137 dòng): `gh pr diff` capture + security-surface regex + APPROVE sentinel check. Lane: Tầng 1 (security-surface). → shipped (28/28 test, fail-CLOSED parity).
+- [x] **[P005]** ✅ `session-banner` subcmd — port `scripts/session-start-banner.sh` (188 dòng): render sprint + advisory staleness + orchestrator contract cho SessionStart. → shipped (27 unit + 4 integration tests, manual epoch Hinnant verified, F-001 verbatim). **→ Phase 2 DONE.**
 
 ---
 
@@ -56,6 +55,8 @@
 
 ## ✅ Recently shipped
 
+- ✅ **[P005] session-banner port** (09/06/2026) — render hook: BACKLOG sprint block + doc size warn + cleanup nudge + advisory staleness + orchestrator contract. stdout always exit 0. Manual ISO→epoch (Hinnant). F-001 verbatim. 27 unit + 4 integration tests. **→ Phase 2 DONE.**
+- ✅ **[P004] block-unsafe-merge port** (09/06/2026) — gh API + security-surface regex + APPROVE sentinel check. Fail-CLOSED divergence. 22 unit + 4 integration tests. Parity vs Bash.
 - ✅ **[P002] architect-guard port** (09/06/2026) — marker gate + forbidden path set + .md allow. Commit `de05a9d`. Parity 8/8 vs Bash.
 - ✅ **[P003] block-env-edit port** (09/06/2026) — regex `^\.env($|\.)` verbatim + .env.example allowlist + notebook fallback. Commit `42530a0`. Parity 10/10 vs Bash. **→ Phase 1 core DONE.**
 - ✅ **[P001] Scaffold CLI** (09/06/2026) — clap derive 5-subcmd + stdin-JSON harness (`io.rs`, fail-open) + exit convention (0/2) + 8 verify-cò integration test. Commit `b216949`. Foundation cho P002–P006.

@@ -2,6 +2,19 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.5.0 — P005 session-banner port — 2026-06-09
+
+- **P005**: Port `session-banner` subcmd 1:1 from `scripts/session-start-banner.sh` (188 lines). Render hook: reads file/git state → prints banner to **stdout** → always exit 0. Phase 2 DONE.
+  - `src/hooks/mod.rs`: replaced stub `session_banner()` with full 10-step render pipeline + 5 pure helpers: `find_sprint_block`, `count_items`, `staleness_days` (manual ISO→epoch, Hinnant days-from-civil, no chrono/time dep), `staleness_category`, `doc_size_warns`.
+  - **Date strategy:** manual ISO→epoch (Howard Hinnant public-domain algorithm, ~10 lines). No new dep added. Verified: `2026-06-09T00:00:00Z` → 1780963200 matches `date -j` output. `staleness_days(iso, now_epoch)` injects `now_epoch` for deterministic unit tests.
+  - **Render hook fail-OPEN**: session-banner ALWAYS returns ALLOW (exit 0), every failure branch is silent. OPPOSITE of `block_unsafe_merge` (fail-CLOSED). Do not confuse.
+  - **stdin NOT read**: `read_payload()` not called. Banner renders from fs/git state only. (Opposite of 3 block hooks.)
+  - **Banner text VERBATIM including bug F-001** (oracle L178): `Marker:` line missing `touch .sos-state/worker-active`. Port doctrine: verbatim copy — fix must go upstream sos-kit updating `.sh` + Rust + orchestrator.md + ORCHESTRATION.md atomically. Text now lives in 2 places.
+  - **git shelling**: `git branch --merged main` via `Command::new("git").args([…])`, NOT `sh -c`. Fail → empty (silent skip).
+  - `tests/cli.rs`: 4 new P005 integration fixtures (CLAUDE_PROJECT_DIR isolation, no `tempfile` dep): with-BACKLOG, no-BACKLOG, no-H2, fallback-header.
+  - `src/hooks/mod.rs`: 27 unit tests for all 5 pure helpers (deterministic, no fs/git/clock).
+  - Docs Gate (Tầng 1 — orchestration-surface): `docs/ARCHITECTURE.md` — session-banner stub→real; new section with full render pipeline, fail-open/stdout/no-stdin divergence note, date manual-epoch note, F-001 note, pure helpers list; Data Flow updated.
+
 ## v0.4.0 — P004 block-unsafe-merge port — 2026-06-09
 
 - **P004**: Port `block-unsafe-merge` subcmd 1:1 from `scripts/block-unsafe-merge.sh`. Security-surface guard: blocks `gh pr merge <N>` when the PR touches security-surface files without a `/security-review APPROVE` comment.

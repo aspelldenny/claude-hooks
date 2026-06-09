@@ -313,3 +313,120 @@ fn p004_branch_only_form_allows() {
         .assert()
         .code(0);
 }
+
+// ── P005 fire-test fixtures (P057 verify-cò) ─────────────────────────────────
+//
+// Integration tests for session-banner. Isolation via CLAUDE_PROJECT_DIR pointing
+// to a manually created temp dir (no `tempfile` dep — same pattern as P002).
+// Git/advisory paths are NOT tested here (git-state-dependent → manual verification).
+
+fn make_banner_temp(name: &str) -> std::path::PathBuf {
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("claude-hooks-banner-{name}-{pid}"));
+    std::fs::create_dir_all(&dir).expect("create banner temp dir");
+    dir
+}
+
+/// Case 1: BACKLOG with Active sprint + items → stdout contains banner markers + exit 0
+#[test]
+fn p005_banner_with_backlog_shows_markers() {
+    let temp = make_banner_temp("case1");
+    let docs = temp.join("docs");
+    std::fs::create_dir_all(&docs).expect("create docs/");
+    std::fs::write(
+        docs.join("BACKLOG.md"),
+        "## 🔥 Active sprint: Test\n- [ ] item one\n- [ ] item two\n- [x] done item\n",
+    )
+    .expect("write BACKLOG");
+
+    let out = bin()
+        .arg("session-banner")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .output()
+        .expect("run binary");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("🏠 Sếp's project"), "missing home emoji header");
+    assert!(
+        stdout.contains("📊 Active sprint:"),
+        "missing sprint count line"
+    );
+    assert!(
+        stdout.contains("🤖 Orchestrator contract"),
+        "missing orchestrator contract block"
+    );
+    assert!(
+        stdout.contains("📌 Architect Rule 0"),
+        "missing architect rule 0"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+/// Case 2: no BACKLOG.md → stdout empty (silent) + exit 0
+#[test]
+fn p005_no_backlog_silent() {
+    let temp = make_banner_temp("case2");
+    // Create docs/ dir but no BACKLOG.md
+    std::fs::create_dir_all(temp.join("docs")).expect("create docs/");
+
+    let out = bin()
+        .arg("session-banner")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .output()
+        .expect("run binary");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.is_empty(), "expected empty stdout, got: {stdout:?}");
+
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+/// Case 3: BACKLOG with no ^## headings → stdout empty + exit 0
+#[test]
+fn p005_backlog_no_h2_silent() {
+    let temp = make_banner_temp("case3");
+    let docs = temp.join("docs");
+    std::fs::create_dir_all(&docs).expect("create docs/");
+    std::fs::write(docs.join("BACKLOG.md"), "# Only H1\nSome prose\n### H3 only\n")
+        .expect("write BACKLOG");
+
+    let out = bin()
+        .arg("session-banner")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .output()
+        .expect("run binary");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.is_empty(), "expected empty stdout for no-h2, got: {stdout:?}");
+
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+/// Case 4: fallback header (no "Active sprint") → stdout contains fallback note
+#[test]
+fn p005_fallback_header_shows_note() {
+    let temp = make_banner_temp("case4");
+    let docs = temp.join("docs");
+    std::fs::create_dir_all(&docs).expect("create docs/");
+    std::fs::write(docs.join("BACKLOG.md"), "## Foo\n- [ ] work\n")
+        .expect("write BACKLOG");
+
+    let out = bin()
+        .arg("session-banner")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .output()
+        .expect("run binary");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("📌 Treating \"Foo\" as Active sprint"),
+        "missing fallback note, got: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp);
+}

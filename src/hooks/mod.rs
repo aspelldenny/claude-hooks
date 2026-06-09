@@ -536,6 +536,653 @@ mod tests {
     }
 }
 
+// ── P005: session-banner helpers (pure, testable without fs/git/clock) ────────
+
+/// Find the "Active sprint" block in a BACKLOG.md string.
+///
+/// Returns `Some((sprint_block, header_text, fallback_used))` or `None` if no
+/// `^## ` heading exists at all. Mirrors oracle L24-51.
+///
+/// - `sprint_block`: from header line to the line before the next `^## ` (exclusive),
+///   or to EOF if no next section. **Includes the header line itself** (oracle L51 `sed`
+///   inclusive range).
+/// - `header_text`: header line stripped of leading `## ` (oracle L38 `sed 's/^## *//'`).
+/// - `fallback_used`: true when "Active sprint" not found and first `^## ` used instead.
+fn find_sprint_block(backlog: &str) -> Option<(String, String, bool)> {
+    let lines: Vec<&str> = backlog.lines().collect();
+
+    // Oracle L25: grep -n "^## .*Active sprint" | head -1
+    let active_idx = lines.iter().position(|l| {
+        l.starts_with("## ") && l.contains("Active sprint")
+    });
+
+    let (header_idx, fallback_used) = if let Some(idx) = active_idx {
+        (idx, false)
+    } else {
+        // Oracle L29-31: fallback to first "^## " line
+        let idx = lines.iter().position(|l| l.starts_with("## "))?;
+        (idx, true)
+    };
+
+    // Oracle L38: strip "^## *" prefix for header_text
+    let header_text = lines[header_idx]
+        .trim_start_matches('#')
+        .trim_start()
+        .to_owned();
+
+    // Oracle L41 awk: find next "^## " AFTER header_idx
+    let next_section_idx = lines
+        .iter()
+        .enumerate()
+        .skip(header_idx + 1)
+        .find(|(_, l)| l.starts_with("## "))
+        .map(|(i, _)| i);
+
+    // Oracle L44-48: end line = line before next section, or EOF
+    let end_idx = match next_section_idx {
+        Some(i) => i - 1, // inclusive end (last line of sprint block)
+        None => lines.len().saturating_sub(1),
+    };
+
+    // Oracle L51: sed "${HEADER_LINE},${END_LINE}p" — inclusive header to end
+    let block_lines = &lines[header_idx..=end_idx];
+    let sprint_block = block_lines.join("\n");
+
+    Some((sprint_block, header_text, fallback_used))
+}
+
+/// Count open (`^- [ ]`) and done (`^- [x]`) items in a sprint block.
+/// Returns `(open_count, done_count)`. Oracle L55-56.
+fn count_items(block: &str) -> (usize, usize) {
+    let open = block.lines().filter(|l| l.starts_with("- [ ]")).count();
+    let done = block.lines().filter(|l| l.starts_with("- [x]")).count();
+    (open, done)
+}
+
+/// Parse ISO-8601 UTC string `"%Y-%m-%dT%H:%M:%SZ"` into an epoch second using
+/// Hinnant days-from-civil algorithm (no external crate). Returns `None` on parse error.
+///
+/// `now_epoch` is injected so unit tests are deterministic (caller passes
+/// `SystemTime::now()…as_secs() as i64` in production). Oracle L157-161.
+fn staleness_days(iso: &str, now_epoch: i64) -> Option<i64> {
+    // Accept both JSON-extracted and legacy-raw (same format either way after trim).
+    let s = iso.trim();
+
+    // Expected format: "2026-06-09T12:00:00Z"
+    // Minimum length check: "2026-06-09T00:00:00Z" = 20 chars
+    if s.len() < 20 {
+        return None;
+    }
+
+    let year: i64 = s[0..4].parse().ok()?;
+    let month: i64 = s[5..7].parse().ok()?;
+    let day: i64 = s[8..10].parse().ok()?;
+    // T at index 10 expected
+    if s.as_bytes().get(10) != Some(&b'T') {
+        return None;
+    }
+    let hour: i64 = s[11..13].parse().ok()?;
+    let min: i64 = s[14..16].parse().ok()?;
+    let sec: i64 = s[17..19].parse().ok()?;
+
+    // Validate ranges
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&min)
+        || !(0..=60).contains(&sec)
+    {
+        return None;
+    }
+
+    // Howard Hinnant days-from-civil (public domain) — UTC, no leap-second concern
+    // at day granularity. Formula for (y, m, d) -> days since 1970-01-01.
+    let y = year - if month <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // 0..=399
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days_since_epoch = era * 146097 + doe - 719468;
+
+    let parsed_epoch = days_since_epoch * 86400 + hour * 3600 + min * 60 + sec;
+    let days = (now_epoch - parsed_epoch) / 86400;
+    Some(days)
+}
+
+/// Categorise advisory staleness. Oracle L162-167.
+#[derive(Debug, PartialEq)]
+enum Staleness {
+    Critical, // >= 7 days
+    Warn,     // 3..=6 days
+    Silent,   // 0..=2 days or negative (future timestamp / clock skew)
+}
+
+fn staleness_category(days: i64) -> Staleness {
+    if days >= 7 {
+        Staleness::Critical
+    } else if days >= 3 {
+        Staleness::Warn
+    } else {
+        Staleness::Silent
+    }
+}
+
+/// For each `(relative_path, bytes)` pair, emit a warning string if `bytes > 40960`.
+/// Caller is responsible for skipping missing files (pure fn, no fs). Oracle L76-87.
+fn doc_size_warns(docs: &[(&str, u64)]) -> Vec<String> {
+    docs.iter()
+        .filter(|(_, bytes)| *bytes > 40960) // oracle L83: -gt (strict)
+        .map(|(doc, bytes)| {
+            let kb = bytes / 1024;
+            // Oracle L85 verbatim (2 spaces after ⚠️):
+            format!(
+                "⚠️  {doc} ({kb}k > 40k threshold) — gọi thợ trim, archive cũ ra docs/archive/"
+            )
+        })
+        .collect()
+}
+
+/// Port of `scripts/session-start-banner.sh` — RENDER hook (stdout, always exit 0).
+///
+/// - Reads file/git state; does NOT read stdin payload (oracle: no `cat` stdin).
+/// - Prints banner to **stdout** (`println!`), NOT stderr. (Opposite of 3 block hooks.)
+/// - **Always returns `ALLOW` (exit 0)** — informational render, never blocks.
+///   Any failure (no BACKLOG, fs error, git fail) → fail-open, silent. This is the
+///   OPPOSITE of `block_unsafe_merge` (fail-CLOSED). Do NOT change to fail-closed.
 pub fn session_banner() -> i32 {
-    ALLOW // real logic in P005 (renders banner from git state)
+    // Step 1 — resolve repo root (oracle L17: CLAUDE_PROJECT_DIR fallback script-dir).
+    // Rust: CLAUDE_PROJECT_DIR if set, else cwd. No actual chdir — join all paths to root.
+    let root = std::env::var("CLAUDE_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+
+    // Step 2 — BACKLOG gate (oracle L19-22): no file → exit 0 silent.
+    let backlog_path = root.join("docs/BACKLOG.md");
+    let backlog_content = match std::fs::read_to_string(&backlog_path) {
+        Ok(s) => s,
+        Err(_) => return ALLOW, // oracle L22: silent
+    };
+
+    // Step 3 — find sprint block (oracle L24-51).
+    let (block, header_text, fallback_used) = match find_sprint_block(&backlog_content) {
+        Some(t) => t,
+        None => return ALLOW, // oracle L35: no ^## → exit 0 silent
+    };
+
+    // Step 4 — count items (oracle L55-56).
+    let (open, done) = count_items(&block);
+
+    // Step 5 — print main banner (oracle L58-71). ALL to stdout (println!).
+    // ━ = U+2501. Oracle line has 60 of them (verified from source).
+    println!();
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("🏠 Sếp's project — Active sprint status");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+    // Oracle L64: echo "$SPRINT_BLOCK" | head -25 (print first 25 lines of block)
+    for line in block.lines().take(25) {
+        println!("{line}");
+    }
+    println!();
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("📊 Active sprint: {open} items đang treo, {done} đã xong");
+    if fallback_used {
+        // Oracle L69-70: blank + fallback note (escaped quotes around header_text)
+        println!();
+        println!(
+            "📌 Treating \"{header_text}\" as Active sprint (no \"Active sprint\" header found)."
+        );
+    }
+
+    // Step 6 — doc size warnings (oracle L73-92).
+    {
+        let doc_list = [
+            "docs/CHANGELOG.md",
+            "docs/DISCOVERIES.md",
+            "CHANGELOG.md",
+        ];
+        let sizes: Vec<(&str, u64)> = doc_list
+            .iter()
+            .filter_map(|&rel| {
+                let path = root.join(rel);
+                std::fs::metadata(&path).ok().map(|m| (rel, m.len()))
+            })
+            .collect();
+
+        let warns = doc_size_warns(&sizes);
+        if !warns.is_empty() {
+            println!();
+            println!("📏 Doc size warning:");
+            for w in &warns {
+                // Oracle L91: printf "    %b" — 4-space indent per warn line
+                println!("    {w}");
+            }
+        }
+    }
+
+    // Step 7 — phiếu cleanup nudge (oracle L94-138).
+    {
+        // Oracle L100-104: prefer docs/ticket/, fallback phieu/active/
+        let phieu_dir = if root.join("docs/ticket").is_dir() {
+            Some(root.join("docs/ticket"))
+        } else if root.join("phieu/active").is_dir() {
+            Some(root.join("phieu/active"))
+        } else {
+            None
+        };
+
+        if let Some(pdir) = phieu_dir {
+            // Oracle L108: git branch --merged main — via Command arg-vec, NOT sh -c
+            let merged_output = std::process::Command::new("git")
+                .args(["branch", "--merged", "main"])
+                .current_dir(&root)
+                .output();
+
+            let merged_branches: Vec<String> = match merged_output {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        // Oracle L108: sed 's/^[* ] //' | tr -d ' '
+                        .map(|l| {
+                            let stripped = if l.starts_with("* ") || l.starts_with("  ") {
+                                &l[2..]
+                            } else {
+                                l
+                            };
+                            stripped.trim().to_owned()
+                        })
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                }
+                _ => Vec::new(), // git fail → empty (skip nudge)
+            };
+
+            let mut nudges: Vec<String> = Vec::new();
+
+            // Oracle L110-131: loop P*.md, skip TEMPLATE, check approval, check merged
+            if let Ok(entries) = std::fs::read_dir(&pdir) {
+                let mut phieu_files: Vec<std::path::PathBuf> = entries
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| {
+                        p.is_file()
+                            && p.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| {
+                                    n.starts_with('P')
+                                        && n.ends_with(".md")
+                                        && n != "TICKET_TEMPLATE.md"
+                                        && n != "TEMPLATE.md"
+                                })
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                phieu_files.sort(); // stable order
+
+                for phieu_path in &phieu_files {
+                    // Oracle L116-120: check "Approved by Chủ nhà:" with non-placeholder value
+                    let content = match std::fs::read_to_string(phieu_path) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    let approved_line = content
+                        .lines()
+                        .find(|l| l.contains("Approved by Chủ nhà:"))
+                        .unwrap_or("");
+
+                    // Oracle L118-120: skip if contains "[date]" or is empty/placeholder
+                    if approved_line.is_empty()
+                        || approved_line.contains("[date]")
+                        || approved_line.trim_end_matches(|c: char| c.is_whitespace())
+                            .ends_with("Approved by Chủ nhà:")
+                    {
+                        continue;
+                    }
+
+                    // Oracle L123: extract phieu_id = ^P[0-9]+ from basename
+                    let basename = phieu_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    let phieu_id = {
+                        let mut id = String::new();
+                        let mut chars = basename.chars();
+                        // Must start with 'P'
+                        if chars.next() == Some('P') {
+                            id.push('P');
+                            for c in chars {
+                                if c.is_ascii_digit() {
+                                    id.push(c);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        id
+                    };
+                    if phieu_id.is_empty() || phieu_id == "P" {
+                        continue;
+                    }
+
+                    // Oracle L127: grep -qE "/${phieu_id}-" in merged branches
+                    let pattern = format!("/{phieu_id}-");
+                    if merged_branches.iter().any(|b| b.contains(&pattern)) {
+                        let slug = basename.to_owned();
+                        nudges.push(format!(
+                            "🧹 Phiếu {phieu_id} approved + merged. Run: phieu-done {slug}"
+                        ));
+                    }
+                }
+            }
+
+            if !nudges.is_empty() {
+                // Oracle L134-137: blank + header + 4-space indent per nudge
+                println!();
+                println!("🧹 Cleanup nudge:");
+                for n in &nudges {
+                    println!("    {n}");
+                }
+            }
+        }
+    }
+
+    // Step 8 — advisory staleness (oracle L140-171). Only if advisory-inbox.md exists.
+    {
+        let inbox = root.join("docs/security/advisory-inbox.md");
+        if inbox.exists() {
+            let state_path = root.join("docs/security/.advisory-scan-state");
+            if !state_path.exists() {
+                // Oracle L149-151: never scanned
+                println!();
+                println!("🚨 Advisory-watch: chưa scan lần nào — gõ /advisory-scan (first scan)");
+            } else {
+                // Oracle L153-155: parse last_scan_at from JSON or legacy raw
+                let state_content = std::fs::read_to_string(&state_path).unwrap_or_default();
+
+                // Try JSON pattern: "last_scan_at" : "<value>"
+                let adv_last = {
+                    // Simple regex-free extraction: find `"last_scan_at"` then scan to value
+                    let json_key = "\"last_scan_at\"";
+                    if let Some(pos) = state_content.find(json_key) {
+                        let after = &state_content[pos + json_key.len()..];
+                        // skip whitespace + `:` + whitespace + opening `"`
+                        let after = after.trim_start();
+                        let after = after.strip_prefix(':').unwrap_or(after).trim_start();
+                        if let Some(rest) = after.strip_prefix('"') {
+                            // read until closing `"`
+                            let end = rest.find('"').unwrap_or(rest.len());
+                            rest[..end].to_owned()
+                        } else {
+                            // Legacy raw: entire content trimmed
+                            state_content.split_whitespace().collect::<String>()
+                        }
+                    } else {
+                        // Legacy raw (oracle L155): tr -d '[:space:]'
+                        state_content.split_whitespace().collect::<String>()
+                    }
+                };
+
+                // Get current epoch for staleness calculation
+                let now_epoch = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+
+                if let Some(days) = staleness_days(&adv_last, now_epoch) {
+                    match staleness_category(days) {
+                        Staleness::Critical => {
+                            // Oracle L163-164 verbatim
+                            println!();
+                            println!(
+                                "🚨 Advisory-watch: scan cuối {days} ngày trước (>= 7) — orchestrator BẮT BUỘC auto-spawn advisory-watch (ORCHESTRATION Rule 11)"
+                            );
+                        }
+                        Staleness::Warn => {
+                            // Oracle L166-167 verbatim (2 spaces after ⚠️)
+                            println!();
+                            println!(
+                                "⚠️  Advisory-watch: scan cuối {days} ngày trước — cân nhắc /advisory-scan"
+                            );
+                        }
+                        Staleness::Silent => {
+                            // 0-2 days or negative → no output (oracle: only >=7 and >=3 emit)
+                        }
+                    }
+                }
+                // None (parse fail) → no output (oracle: epoch=0 → block skipped L160)
+            }
+        }
+    }
+
+    // Step 9 — Orchestrator contract + Architect Rule 0 (oracle L173-188).
+    // PORT VERBATIM including bug F-001 (L178 missing "touch worker-active").
+    // DO NOT fix F-001 here — fix must go upstream to sos-kit canonical .sh.
+    // Discovery: this text now lives in 2 places (.sh + Rust); sync on upstream fix.
+    println!();
+    println!("🤖 Orchestrator contract (main session — đọc kỹ, ép tuân thủ):");
+    println!("    State machine: DRAFT → CHALLENGE → [RESPOND ⇄ CHALLENGE] → APPROVAL_GATE → EXECUTE");
+    println!("    KHÔNG hỏi user giữa các phase. APPROVAL_GATE là gate DUY NHẤT (trước EXECUTE).");
+    println!("    KHÔNG đẩy đọc phiếu/code về user — Worker CHALLENGE rà & report ≤5 dòng.");
+    println!("    Marker: touch .sos-state/architect-active trước spawn architect; rm -f trước spawn worker.");
+    println!("    Deferred tools MANDATORY (load đầu session, KHÔNG fallback markdown 1/2/3):");
+    println!("        ToolSearch select:AskUserQuestion,TaskCreate,TaskUpdate");
+    println!("    Handbook: agents/orchestrator.md (~85 lines, condensed contract)");
+    println!("    Spec đầy đủ: docs/ORCHESTRATION.md");
+    println!();
+    println!("📌 Architect Rule 0: chỉ viết phiếu cho item trong Active sprint (or first ^## section if absent).");
+    println!("    Idea mới → /idea skill (intake vào BACKLOG.md).");
+    println!("    Pick item hay add idea?");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+
+    // Step 10 — always return ALLOW (exit 0). Render hook: NEVER blocks.
+    ALLOW
+}
+
+#[cfg(test)]
+mod session_banner_tests {
+    use super::*;
+
+    // ── find_sprint_block ─────────────────────────────────────────────────────
+
+    #[test]
+    fn sprint_block_active_header_found() {
+        let backlog = "## 🔥 Active sprint: Phase 1\n- [ ] task a\n- [x] task b\n## 🎯 Next sprint\n- [ ] future";
+        let result = find_sprint_block(backlog);
+        assert!(result.is_some());
+        let (block, header, fallback) = result.unwrap();
+        assert!(!fallback);
+        assert_eq!(header, "🔥 Active sprint: Phase 1");
+        assert!(block.contains("task a"));
+        assert!(block.contains("task b"));
+        // Must NOT contain the next section
+        assert!(!block.contains("future"));
+    }
+
+    #[test]
+    fn sprint_block_fallback_to_first_h2() {
+        let backlog = "## Intro\n- [ ] do thing\n## Other\n- [ ] skip";
+        let result = find_sprint_block(backlog);
+        assert!(result.is_some());
+        let (block, header, fallback) = result.unwrap();
+        assert!(fallback);
+        assert_eq!(header, "Intro");
+        assert!(block.contains("do thing"));
+        assert!(!block.contains("skip"));
+    }
+
+    #[test]
+    fn sprint_block_no_h2_returns_none() {
+        let backlog = "# Title\nSome prose\n### H3 only";
+        assert!(find_sprint_block(backlog).is_none());
+    }
+
+    #[test]
+    fn sprint_block_last_section_goes_to_eof() {
+        let backlog = "## Active sprint\n- [ ] task\n- [x] done\n";
+        let result = find_sprint_block(backlog);
+        assert!(result.is_some());
+        let (block, _, _) = result.unwrap();
+        assert!(block.contains("task"));
+        assert!(block.contains("done"));
+    }
+
+    #[test]
+    fn sprint_block_h3_does_not_cut_block() {
+        // H3 (###) must NOT be a boundary — only "^## " (2 hashes + space) cuts
+        let backlog = "## Active sprint\n- [ ] item\n### Sub heading\n- [ ] sub\n## Next\n- [ ] skip";
+        let (block, _, _) = find_sprint_block(backlog).unwrap();
+        assert!(block.contains("sub"));       // H3 sub stays inside block
+        assert!(!block.contains("skip"));     // "## Next" cuts
+    }
+
+    // ── count_items ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn count_items_mixed() {
+        let block = "- [ ] a\n- [x] b\n- [ ] c";
+        assert_eq!(count_items(block), (2, 1));
+    }
+
+    #[test]
+    fn count_items_empty() {
+        assert_eq!(count_items(""), (0, 0));
+    }
+
+    #[test]
+    fn count_items_uppercase_x_not_counted() {
+        // Oracle uses [x] lowercase only (L56)
+        let block = "- [X] big-x\n- [x] small-x";
+        let (_, done) = count_items(block);
+        assert_eq!(done, 1); // only lowercase x counts
+    }
+
+    // ── staleness_days ────────────────────────────────────────────────────────
+
+    // Epoch for 2026-06-09T00:00:00Z verified via `date -j -f` = 1780963200
+    // Epoch for 2026-06-16T00:00:00Z = 1781568000 (7 days later)
+    const EPOCH_2026_06_09: i64 = 1780963200;
+    const EPOCH_2026_06_16: i64 = 1781568000; // +7 days
+
+    #[test]
+    fn staleness_days_7_days() {
+        let result = staleness_days("2026-06-09T00:00:00Z", EPOCH_2026_06_16);
+        assert_eq!(result, Some(7));
+    }
+
+    #[test]
+    fn staleness_days_3_days() {
+        let now = EPOCH_2026_06_09 + 3 * 86400;
+        let result = staleness_days("2026-06-09T00:00:00Z", now);
+        assert_eq!(result, Some(3));
+    }
+
+    #[test]
+    fn staleness_days_1_day() {
+        let now = EPOCH_2026_06_09 + 86400;
+        let result = staleness_days("2026-06-09T00:00:00Z", now);
+        assert_eq!(result, Some(1));
+    }
+
+    #[test]
+    fn staleness_days_legacy_raw_same_result() {
+        // Legacy raw = no JSON wrapping, just the ISO string trimmed
+        let result = staleness_days("2026-06-09T00:00:00Z", EPOCH_2026_06_16);
+        assert_eq!(result, Some(7));
+    }
+
+    #[test]
+    fn staleness_days_garbage_returns_none() {
+        assert_eq!(staleness_days("garbage", 1000000), None);
+    }
+
+    #[test]
+    fn staleness_days_invalid_date_returns_none() {
+        // Month 13 is invalid
+        assert_eq!(staleness_days("2026-13-99T00:00:00Z", 1000000), None);
+    }
+
+    #[test]
+    fn staleness_days_future_returns_negative() {
+        // now < parsed → days negative
+        let past_epoch = EPOCH_2026_06_09 - 86400; // 1 day before
+        let result = staleness_days("2026-06-09T00:00:00Z", past_epoch);
+        assert!(result.is_some());
+        assert!(result.unwrap() < 0);
+    }
+
+    #[test]
+    fn staleness_days_epoch_math_spot_check() {
+        // Verify Hinnant formula: 2026-06-09T00:00:00Z → 1780963200
+        // (verified against `date -j -f "%Y-%m-%dT%H:%M:%SZ" "2026-06-09T00:00:00Z" +%s`)
+        let result = staleness_days("2026-06-09T00:00:00Z", EPOCH_2026_06_09);
+        assert_eq!(result, Some(0)); // same day = 0 days
+    }
+
+    // ── staleness_category ────────────────────────────────────────────────────
+
+    #[test]
+    fn staleness_category_critical_7() {
+        assert_eq!(staleness_category(7), Staleness::Critical);
+    }
+
+    #[test]
+    fn staleness_category_critical_10() {
+        assert_eq!(staleness_category(10), Staleness::Critical);
+    }
+
+    #[test]
+    fn staleness_category_warn_3() {
+        assert_eq!(staleness_category(3), Staleness::Warn);
+    }
+
+    #[test]
+    fn staleness_category_warn_6() {
+        assert_eq!(staleness_category(6), Staleness::Warn);
+    }
+
+    #[test]
+    fn staleness_category_silent_0() {
+        assert_eq!(staleness_category(0), Staleness::Silent);
+    }
+
+    #[test]
+    fn staleness_category_silent_2() {
+        assert_eq!(staleness_category(2), Staleness::Silent);
+    }
+
+    #[test]
+    fn staleness_category_silent_negative() {
+        assert_eq!(staleness_category(-5), Staleness::Silent);
+    }
+
+    // ── doc_size_warns ────────────────────────────────────────────────────────
+
+    #[test]
+    fn doc_size_warns_over_threshold() {
+        let warns = doc_size_warns(&[("docs/CHANGELOG.md", 50000)]);
+        assert_eq!(warns.len(), 1);
+        // 50000 / 1024 = 48
+        assert!(warns[0].contains("docs/CHANGELOG.md (48k > 40k threshold)"));
+    }
+
+    #[test]
+    fn doc_size_warns_exact_threshold_not_warned() {
+        // strict ">", 40960 is NOT > 40960
+        let warns = doc_size_warns(&[("CHANGELOG.md", 40960)]);
+        assert!(warns.is_empty());
+    }
+
+    #[test]
+    fn doc_size_warns_one_above_threshold() {
+        // 40961 / 1024 = 40
+        let warns = doc_size_warns(&[("CHANGELOG.md", 40961)]);
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("CHANGELOG.md (40k > 40k threshold)"));
+    }
+
+    #[test]
+    fn doc_size_warns_empty_input() {
+        let warns = doc_size_warns(&[]);
+        assert!(warns.is_empty());
+    }
 }
