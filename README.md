@@ -106,6 +106,17 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
 
 Fail-open by default (all hooks except `block-unsafe-merge`). `block-unsafe-merge` is **fail-CLOSED**: `gh` unavailable or empty diff → block.
 
+## Environment variables
+
+`claude-hooks` reads no `.env` file — it is a stateless CLI binary. Two optional environment variables affect behavior; both are read at runtime via `std::env::var` and default safely when unset:
+
+| Variable | Set by | Effect |
+|---|---|---|
+| `CLAUDE_PROJECT_DIR` | Claude Code (automatically, when firing a hook) | Repo root for resolving `.sos-state/` markers, `docs/BACKLOG.md`, and relative paths. Falls back to the current working directory when unset. |
+| `SECURITY_SURFACE_EXTRA` | Optional, per-repo (deployer) | Extra regex alternation appended to `block-unsafe-merge`'s security-surface pattern (e.g. `mycrate/secrets/`). Unset = generic pattern only. |
+
+No secrets are read from the environment. There is intentionally no `.env.example` — neither variable holds a credential, and `CLAUDE_PROJECT_DIR` is supplied by the Claude Code harness rather than the operator.
+
 ## See also
 
 - `docs/ARCHITECTURE.md` — detailed pipeline docs for each hook, Decision-core refactor, MCP transport notes.
