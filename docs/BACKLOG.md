@@ -16,8 +16,8 @@
 > **Reference Bash (đã copy vào `scripts/` khi adopt — port từ đây, KHÔNG bịa logic):** `scripts/architect-guard.sh` · `scripts/block-env-edit.sh`.
 
 - [x] **[P001]** ✅ Scaffold CLI — `clap` derive, 5 subcmd registered (`architect-guard` · `block-env-edit` · `block-unsafe-merge` · `session-banner` · `serve`), stdin JSON parse harness (`serde_json`), exit-code convention (0 allow / 2 block) + stderr reason. **Verify-cò (P057 spirit):** mỗi subcmd stub trả exit hợp lệ + 1 integration test `assert_cmd` xác nhận CLI dispatch nổ. → shipped `b216949` (8/8 test, fail-open parity verified).
-- [ ] **[P002]** `architect-guard` subcmd — port `scripts/architect-guard.sh` (119 dòng): parse `tool_input.file_path` từ stdin JSON, check `.sos-state/architect-active` marker, block product-code Read/Glob khi architect active, exit 0/2 + reason. **Fire-test:** fixture set (architect-active + product file → exit 2; doc file → exit 0; no marker → exit 0).
-- [ ] **[P003]** `block-env-edit` subcmd — port `scripts/block-env-edit.sh` (54 dòng): block `.env*` Edit/Write, allow `.env.example`, regex `^\.env($|\.)` verbatim. **Fire-test:** `.env` → 2, `.env.example` → 0, `.envrc` → 0 (mirror sos-kit P052 [O1.1] decision).
+- [x] **[P002]** ✅ `architect-guard` subcmd — port `scripts/architect-guard.sh`: marker gate + forbidden path set + .md allow, exit 0/2 + reason. → shipped `de05a9d` (14/14 test, **parity 8/8 vs Bash oracle** incl. crates/src + ./ strip edges).
+- [x] **[P003]** ✅ `block-env-edit` subcmd — port `scripts/block-env-edit.sh`: block `.env*`, allow `.env.example`, regex `^\.env($|\.)` verbatim (regex::Regex). → shipped `42530a0` (24/24 test, **parity 10/10 vs Bash oracle** incl. .envrc/.environment/notebook fallback).
 
 ---
 
@@ -56,6 +56,8 @@
 
 ## ✅ Recently shipped
 
+- ✅ **[P002] architect-guard port** (09/06/2026) — marker gate + forbidden path set + .md allow. Commit `de05a9d`. Parity 8/8 vs Bash.
+- ✅ **[P003] block-env-edit port** (09/06/2026) — regex `^\.env($|\.)` verbatim + .env.example allowlist + notebook fallback. Commit `42530a0`. Parity 10/10 vs Bash. **→ Phase 1 core DONE.**
 - ✅ **[P001] Scaffold CLI** (09/06/2026) — clap derive 5-subcmd + stdin-JSON harness (`io.rs`, fail-open) + exit convention (0/2) + 8 verify-cò integration test. Commit `b216949`. Foundation cho P002–P006.
 - ✅ **Kit adopt** (09/06/2026) — `sos adopt` hạ full sos-kit spine (agents + hooks + phieu + skills + gates) vào repo; `.sos-stack.toml` rust; `core.hooksPath=hooks` wired. Sẵn sàng code Phase 1.
 
