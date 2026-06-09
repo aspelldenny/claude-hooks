@@ -6,7 +6,7 @@
 It runs in two modes: **CLI** (invoked by Claude Code PreToolUse hooks) and **MCP** (stdio JSON-RPC server for debug tooling).
 The binary name is `claude-hooks`; subcommands are kebab-case.
 
-**Status:** Phase 1-3 complete (P001–P007). Phase 4 ship-prep (P008): README + publish-ready (v0.8.0, serverInfo.name fixed). Phase 4 wire-tarot = P009.
+**Status:** Phase 1-3 complete (P001–P007). Phase 4 ship-prep (P008): README + publish-ready (v0.8.0, serverInfo.name fixed). Phase 4 wire-tarot = P009. P010: architect-guard TRUE parity tarot (F-004 fix, v0.9.0).
 
 ## CLI Surface
 
@@ -22,38 +22,57 @@ The binary name is `claude-hooks`; subcommands are kebab-case.
 
 Kebab-case names are auto-derived by clap from PascalCase variants (verified P001: no `#[command(name=...)]` needed for clap 4.6).
 
-### `architect-guard` (P002 — real implementation)
+### `architect-guard` (P002 real implementation, P010 TRUE parity tarot)
 
-Ports `scripts/architect-guard.sh` 1:1. Fires on every `Read`/`Glob` PreToolUse call.
+Ports `scripts/architect-guard.sh` 1:1 (tarot oracle 119-line). Fires on `Read`/`Glob`/`Write`/`Edit` PreToolUse calls.
 
-**Pipeline (8 steps):**
+**Pipeline:**
 
-1. Resolve repo root from `CLAUDE_PROJECT_DIR` env (fallback: cwd). All internal paths bind to this root.
-2. **Marker gate:** if `.sos-state/architect-active` does not exist → `ALLOW` (not running as Architect).
-3. Parse path from stdin JSON: `tool_input.file_path` (priority), fallback `tool_input.pattern`.
-4. No path parsed → `ALLOW` (fail-open).
-5. Strip leading `./`.
-6. Path ends with `.md` → `ALLOW` (docs are Architect's domain).
-7. **Forbidden pattern check** — `BLOCK` if any match:
+1. Resolve repo root from `CLAUDE_PROJECT_DIR` env (fallback: cwd).
+2. **Marker gate:** if `.sos-state/architect-active` does not exist → `ALLOW` (not running as Architect). GIỮ `.sos-state/` (F-005 marker-path unify defer — oracle tarot uses `.claude/.architect-active`).
+3. **tool_name dispatch** (P010, oracle L96-116):
+   - `Read` | `Glob` → **Read/Glob branch** (steps 4-6 below).
+   - `Write` | `Edit` → **Write/Edit branch** (steps 7-8 below).
+   - None / other → **default ALLOW** (real Claude Code payload always has tool_name; absent = not a guarded call).
+
+4. **(Read/Glob branch)** Check 3 candidates: `tool_input.file_path`, `tool_input.pattern`, `tool_input.path` (Glob search root). For each non-empty candidate:
+5. Strip leading `./`. If ends with `.md` → skip (early-allow; docs are Architect's domain).
+6. **`is_forbidden_for_read`** — `BLOCK` (block_read message) if any match:
 
    | Group | Pattern | Rust check |
    |---|---|---|
    | Source dirs (prefix) | `src/*`, `lib/*`, `app/*`, `pkg/*` | `starts_with` |
    | Source dirs (segment) | `*/src/*`, `*/lib/*`, `*/app/*`, `*/pkg/*` | `contains` |
+   | crates subcrate src | `crates/*/src/*` | `starts_with("crates/")` + `contains("/src/")` |
+   | Prisma dirs (P010 NEW) | `prisma/*`, `*/prisma/*` | `starts_with` / `contains` |
    | Test dirs (prefix) | `tests/*`, `test/*`, `__tests__/*` | `starts_with` |
    | Test dirs (segment) | `*/tests/*`, `*/test/*` | `contains` |
    | Build artifacts (prefix only) | `node_modules/*`, `target/*`, `dist/*`, `build/*`, `.next/*`, `.nuxt/*`, `.svelte-kit/*` | `starts_with` |
-   | Extensions | `*.rs *.ts *.tsx *.js *.jsx *.py *.go *.java *.cpp *.c *.h *.hpp` | `ends_with` |
+   | Code extensions | `*.rs *.ts *.tsx *.js *.jsx *.py *.go *.java *.cpp *.c *.h *.hpp` | `ends_with` |
+   | DB schema extensions (P010 NEW) | `*.prisma *.sql` | `ends_with` |
 
-   Default (no match) → `ALLOW`.
+   All candidates pass without hit → `ALLOW`.
 
-8. Blocked → `io::block(msg)` (writes message to stderr, returns exit 2).
+7. **(Write/Edit branch)** No `file_path` (empty/missing) → `ALLOW` (defensive, oracle L111).
+8. **`is_allowed_for_write`** — `BLOCK` (block_write message) if NOT in allowlist:
 
-**Exit codes:** `0` (ALLOW), `2` (BLOCK — see exit-code table above).
+   | Check | Order | Rule |
+   |---|---|---|
+   | `docs/ticket/TICKET_TEMPLATE.md` | FIRST — explicit deny | Template is reference, not a phiếu |
+   | `docs/ticket/P*-*.md` or `*/docs/ticket/P*-*.md` | ALLOW | Phiếu files only |
+   | Everything else | BLOCK | src/, CLAUDE.md, BACKLOG.md, CHANGELOG.md, guides → Worker's domain |
 
-**Block message** (stderr, verbatim oracle): `🚫 Architect envelope violation` + path (original, pre-strip) + instructions for Task 0 anchor workflow.
+**Exit codes:** `0` (ALLOW), `2` (BLOCK).
 
-**P006 Decision-core:** `architect_guard_decide(file_path, pattern) -> Decision` contains the marker + path logic. `architect_guard() -> i32` is the thin CLI wrapper (reads stdin, calls `_decide`, prints reason, returns exit_code).
+**2 block messages** (stderr, verbatim oracle tarot L65-94):
+- `block_read` (Read/Glob): `🚫 Architect envelope violation (Read/Glob)` + path + Task 0 anchor instructions.
+- `block_write` (Write/Edit): `🚫 Architect envelope violation (Write/Edit)` + path + allowlist reminder.
+
+**P006/P010 Decision-core:** `architect_guard_decide(tool_name, file_path, pattern, path) -> Decision` (4-arg, P010). `architect_guard() -> i32` is the thin CLI wrapper (reads stdin, extracts `p.tool_name` + `p.tool_input.{file_path,pattern,path}`, calls `_decide`, prints reason, returns exit_code).
+
+**Fail-open:** fail-OPEN (marker absent / no tool_name / no paths → ALLOW). KHÔNG fail-CLOSED (opposite of block_unsafe_merge).
+
+**state-honesty note (MCP):** MCP tool `architect_guard` + `why_blocked` Read/Glob route both read `.sos-state/architect-active` from the fs of the serve environment. If serve runs without marker, Read/Glob calls return ALLOW (correct — no architect active).
 
 ### `block-env-edit` (P003 — real implementation)
 
@@ -159,7 +178,7 @@ Each hook now has two layers:
 
 | Layer | Function | Reads stdin? | Prints? | Returns |
 |---|---|---|---|---|
-| Core (`_decide`) | `architect_guard_decide(file_path, pattern)` | No | No | `Decision { exit_code, blocked, reason }` |
+| Core (`_decide`) | `architect_guard_decide(tool_name, file_path, pattern, path)` (P010 4-arg) | No | No | `Decision { exit_code, blocked, reason }` |
 | CLI wrapper | `architect_guard()` | Yes (`read_payload()`) | Yes (stderr) | `i32` (exit code) |
 | Core | `block_env_edit_decide(file_path, notebook_path)` | No | No | `Decision` |
 | CLI wrapper | `block_env_edit()` | Yes | Yes (stderr) | `i32` |
@@ -182,7 +201,7 @@ Each hook now has two layers:
 
 | Tool | Input | Output | Behavior |
 |---|---|---|---|
-| `architect_guard` | `{ file_path?, pattern? }` | `DecisionOutput` | Marker gate + forbidden path check (real fs read) |
+| `architect_guard` | `{ tool_name?, file_path?, pattern?, path? }` | `DecisionOutput` | Marker gate + tool_name dispatch + forbidden/allowed path check (real fs read). P010: +tool_name +path. |
 | `block_env_edit` | `{ file_path?, notebook_path? }` | `DecisionOutput` | `.env*` check (not `.env.example`) |
 | `block_unsafe_merge` | `{ command? }` | `DecisionOutput` | PR merge check (real gh shell calls, fail-CLOSED) |
 | `session_banner` | `{}` | `{ banner: String }` | Full banner from fs/git state of serve env |
@@ -196,10 +215,12 @@ Accepts the full PreToolUse tool-call shape `{"tool_name":"Read","tool_input":{"
 
 | `tool_name` | Hook fired | Decision fn called |
 |---|---|---|
-| `Read`, `Glob` | `architect_guard` | `architect_guard_decide(file_path, pattern)` |
+| `Read`, `Glob` | `architect_guard` | `architect_guard_decide(tool_name, file_path, pattern, path=None)` (P010: 4-arg) |
 | `Edit`, `Write`, `MultiEdit`, `NotebookEdit` | `block_env_edit` | `block_env_edit_decide(file_path, notebook_path)` |
 | `Bash` | `block_unsafe_merge` | `block_unsafe_merge_decide(command)` |
 | any other | `none` | — (returns `blocked=false, exit_code=0`) |
+
+**Tension 3 / why_blocked limitation (P010):** In tarot deploy, `Write`/`Edit` fires BOTH `architect_guard` (Write/Edit allowlist check) AND `block_env_edit` (.env* check) as separate hooks. `why_blocked` routes `Edit|Write` to `block_env_edit` ONLY (bounded, P010 = option a). To debug architect_guard Write/Edit block via MCP, call `architect_guard` tool directly with `tool_name="Write"/"Edit"`. Multi-hook `why_blocked` routing = finding for future phiếu.
 
 **State-honesty notes:**
 - `architect_guard` route reads `.sos-state/architect-active` marker from the fs of the environment where `serve` runs. If serve runs outside an architect-active context (marker absent), `Read`/`Glob` will return ALLOW — this is correct and honest behavior. Callers should be aware of this when using `why_blocked` for debug.
@@ -219,17 +240,21 @@ Accepts the full PreToolUse tool-call shape `{"tool_name":"Read","tool_input":{"
 Claude Code PreToolUse hooks pass a JSON payload on stdin:
 
 ```json
-{ "tool_input": { "file_path": "...", "pattern": "...", "notebook_path": "...", "command": "..." } }
+{ "tool_name": "Read", "tool_input": { "file_path": "...", "pattern": "...", "path": "...", "notebook_path": "...", "command": "..." } }
 ```
 
+`HookPayload` top-level fields (`#[serde(default)]`):
+- `tool_name: Option<String>` — added P010. Used by `architect-guard` for tool_name dispatch. Real Claude Code payload always includes this; absent → default ALLOW in dispatch.
+
 `ToolInput` fields (all `Option<String>`, `#[serde(default)]`):
-- `file_path` — used by `architect-guard` (priority) and `block-env-edit`.
-- `pattern` — used by `architect-guard` (fallback when `file_path` absent).
+- `file_path` — used by `architect-guard` (Read path, and Write/Edit path) and `block-env-edit`.
+- `pattern` — used by `architect-guard` (Glob pattern candidate, Read/Glob branch).
+- `path` — added P010. Used by `architect-guard` (Glob search root candidate, Read/Glob branch).
 - `notebook_path` — used by `block-env-edit` (NotebookEdit fallback).
-- `command` — added P004. Used by `block-unsafe-merge`. Bash-tool payload field. P006/P007 may reuse.
+- `command` — added P004. Used by `block-unsafe-merge`. Bash-tool payload field.
 
 The harness (`read_payload()`) reads all stdin and parses via serde_json.
-**Fail-open semantics (HARD):** empty stdin / invalid JSON / missing fields → `HookPayload::default()` (all `Option` fields are `None`). No `unwrap()`/`expect()` panics on parse path. Mirrors `scripts/architect-guard.sh:44` and `scripts/block-env-edit.sh:23,35`.
+**Fail-open semantics (HARD):** empty stdin / invalid JSON / missing fields → `HookPayload::default()` (all `Option` fields are `None`). No `unwrap()`/`expect()` panics on parse path. Mirrors `scripts/architect-guard.sh` and `scripts/block-env-edit.sh`.
 
 ### Exit-Code Convention
 
