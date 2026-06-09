@@ -15,7 +15,7 @@
 > **Started:** 09/06/2026
 > **Reference Bash (đã copy vào `scripts/` khi adopt — port từ đây, KHÔNG bịa logic):** `scripts/architect-guard.sh` · `scripts/block-env-edit.sh`.
 
-- [ ] **[P001]** Scaffold CLI — `clap` derive, 5 subcmd registered (`architect-guard` · `block-env-edit` · `block-unsafe-merge` · `session-banner` · `serve`), stdin JSON parse harness (`serde_json`), exit-code convention (0 allow / 2 block) + stderr reason. **Verify-cò (P057 spirit):** mỗi subcmd stub trả exit hợp lệ + 1 integration test `assert_cmd` xác nhận CLI dispatch nổ.
+- [x] **[P001]** ✅ Scaffold CLI — `clap` derive, 5 subcmd registered (`architect-guard` · `block-env-edit` · `block-unsafe-merge` · `session-banner` · `serve`), stdin JSON parse harness (`serde_json`), exit-code convention (0 allow / 2 block) + stderr reason. **Verify-cò (P057 spirit):** mỗi subcmd stub trả exit hợp lệ + 1 integration test `assert_cmd` xác nhận CLI dispatch nổ. → shipped `b216949` (8/8 test, fail-open parity verified).
 - [ ] **[P002]** `architect-guard` subcmd — port `scripts/architect-guard.sh` (119 dòng): parse `tool_input.file_path` từ stdin JSON, check `.sos-state/architect-active` marker, block product-code Read/Glob khi architect active, exit 0/2 + reason. **Fire-test:** fixture set (architect-active + product file → exit 2; doc file → exit 0; no marker → exit 0).
 - [ ] **[P003]** `block-env-edit` subcmd — port `scripts/block-env-edit.sh` (54 dòng): block `.env*` Edit/Write, allow `.env.example`, regex `^\.env($|\.)` verbatim. **Fire-test:** `.env` → 2, `.env.example` → 0, `.envrc` → 0 (mirror sos-kit P052 [O1.1] decision).
 
@@ -56,6 +56,7 @@
 
 ## ✅ Recently shipped
 
+- ✅ **[P001] Scaffold CLI** (09/06/2026) — clap derive 5-subcmd + stdin-JSON harness (`io.rs`, fail-open) + exit convention (0/2) + 8 verify-cò integration test. Commit `b216949`. Foundation cho P002–P006.
 - ✅ **Kit adopt** (09/06/2026) — `sos adopt` hạ full sos-kit spine (agents + hooks + phieu + skills + gates) vào repo; `.sos-stack.toml` rust; `core.hooksPath=hooks` wired. Sẵn sàng code Phase 1.
 
 ---
