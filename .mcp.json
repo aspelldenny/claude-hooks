@@ -4,6 +4,11 @@
       "_comment": "sos-kit mechanical gate. Our own Rust tool — wire via PATH. Install: cargo install --path ~/doctor.",
       "command": "doctor",
       "args": ["serve"]
+    },
+    "claude-hooks": {
+      "_comment": "This repo's own binary — hook-decision debug tools (architect_guard, block_env_edit, block_unsafe_merge, session_banner, why_blocked). Install: cargo install --path . — must be on PATH.",
+      "command": "claude-hooks",
+      "args": ["serve"]
     }
   }
 }
