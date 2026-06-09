@@ -1,0 +1,10 @@
+# Executable scripts + git hooks MUST stay LF.
+# Windows checkout with core.autocrlf=true would otherwise rewrite these to CRLF, which
+# breaks the `#!/usr/bin/env bash` shebang (`bash\r`) and trailing-CR token parsing under
+# bash. eol=lf here overrides autocrlf so every checkout (macOS/Linux/Windows) gets LF.
+# (sos-kit P059 — Windows portability dogfood, 2026-06-09.)
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.py    text eol=lf
+hooks/* text eol=lf
+bin/*   text eol=lf

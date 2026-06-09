@@ -17,6 +17,21 @@ for arg in "$@"; do
     esac
 done
 
+# Resolve a Python interpreter that ACTUALLY runs. On Windows `python3` is a Microsoft Store
+# shim sitting on PATH that exits non-zero → `command -v` is NOT enough, must test execution.
+# fail-closed (Sếp directive 2026-06-09): không có Python chạy được = không verify được INV
+# = BLOCK (exit 1), KHÔNG silent-skip.
+PY=""
+for c in python3 python py; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+if [ -z "$PY" ]; then
+    echo "⛔ BLOCKED: security gate cần Python nhưng không tìm thấy interpreter chạy được" >&2
+    echo "   (đã thử: python3, python, py — fail-closed, không verify được = chặn)." >&2
+    echo "   Cài Python, hoặc đảm bảo 'python'/'python3' chạy được trong shell này." >&2
+    exit 1
+fi
+
 PASS=0
 FAIL=0
 FAILED_INVS=()
@@ -43,11 +58,11 @@ run() {
 
 # INV-009: no hardcoded secret in source files
 run "INV-009" "No hardcoded secret in source files" \
-    python3 scripts/check-hardcoded-secrets.py
+    "$PY" scripts/check-hardcoded-secrets.py
 
 # INV-010: no secret in runtime state + infra files
 run "INV-010" "No secret in runtime state + infra files (Sub-mech F)" \
-    python3 scripts/check-runtime-secrets.py
+    "$PY" scripts/check-runtime-secrets.py
 
 # =============================================================================
 # CUSTOMIZE — extend with per-repo invariants below this line

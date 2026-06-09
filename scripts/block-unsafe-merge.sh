@@ -30,18 +30,12 @@ fi
 # Không có input → pass through
 if [ -z "$INPUT" ]; then exit 0; fi
 
-# Parse command từ JSON
-COMMAND=$(echo "$INPUT" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    print(data.get('tool_input', {}).get('command', ''))
-except Exception:
-    print('')
-" 2>/dev/null || echo "")
-
-# Không có command → tool khác → pass
-if [ -z "$COMMAND" ]; then exit 0; fi
+# Parse command — pure shell, NO interpreter.
+# (python3 trên Windows = Microsoft Store shim: exit≠0 → COMMAND rỗng → exit 0 = FAIL-OPEN,
+#  merge guard chết im lặng.) Các pattern dưới đây đặc thù (`gh pr merge <N>`,
+#  `[security-review-skip:]`) nên match thẳng trên raw payload là an toàn, zero-dep, và không
+#  bị escaped-quote cắt cụt. INPUT đã được verify non-empty ở trên. (Mirror architect-guard.sh.)
+COMMAND="$INPUT"
 
 # Match `gh pr merge <N>` (allow flag variants: --squash, --merge, --delete-branch, etc.)
 if ! echo "$COMMAND" | grep -qE 'gh pr merge[[:space:]]+[0-9]+'; then

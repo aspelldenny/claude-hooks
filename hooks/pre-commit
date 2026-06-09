@@ -52,14 +52,29 @@ elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
     # Python: syntax-check staged .py files (not full mypy — too slow)
     PY_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
     if [ -n "$PY_FILES" ]; then
-        echo "  → python syntax check ($(echo "$PY_FILES" | wc -l | tr -d ' ') files)"
-        for f in $PY_FILES; do
-            if ! python3 -c "import ast; ast.parse(open('$f').read())" 2>/dev/null; then
-                red "  ❌ Syntax error in $f"
-                FAIL_COUNT=$((FAIL_COUNT + 1))
-            fi
+        # Resolve a Python that ACTUALLY runs (Windows `python3` = Microsoft Store shim:
+        # on PATH but exits non-zero → test execution, not just `command -v`).
+        # This is a best-effort syntax linter (NOT a security boundary) → no working
+        # interpreter = loud WARN + skip, NOT a hard block (avoid bricking commits on a
+        # machine without Python). Security gates fail-closed; a linter does not.
+        PY=""
+        for c in python3 python py; do
+            if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PY="$c"; break; fi
         done
-        [ "$FAIL_COUNT" = "0" ] && green "  ✅ Syntax check passed"
+        if [ -z "$PY" ]; then
+            yellow "  ⚠️  No working Python (tried python3/python/py) — syntax check SKIPPED"
+            echo "     Staged .py NOT syntax-verified at commit; run build/test before PR."
+            WARN_COUNT=$((WARN_COUNT + 1))
+        else
+            echo "  → python syntax check ($(echo "$PY_FILES" | wc -l | tr -d ' ') files, via $PY)"
+            for f in $PY_FILES; do
+                if ! "$PY" -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$f" 2>/dev/null; then
+                    red "  ❌ Syntax error in $f"
+                    FAIL_COUNT=$((FAIL_COUNT + 1))
+                fi
+            done
+            [ "$FAIL_COUNT" = "0" ] && green "  ✅ Syntax check passed"
+        fi
     else
         echo "  ⏭  No .py files staged"
     fi

@@ -22,17 +22,16 @@ fi
 # Không có input → pass through (hook không có context để check)
 if [ -z "$INPUT" ]; then exit 0; fi
 
-# Parse file_path từ JSON
-FILE_PATH=$(echo "$INPUT" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    print(data.get('tool_input', {}).get('file_path', ''))
-except Exception:
-    print('')
-" 2>/dev/null || echo "")
+# Parse file_path từ JSON — pure sed, NO interpreter.
+# (python3 trên Windows = Microsoft Store shim: trên PATH nhưng exit≠0 → FILE_PATH rỗng
+#  → exit 0 = FAIL-OPEN, .env edit lọt. Mirror architect-guard.sh zero-dep approach:
+#  chạy được macOS/Linux/Git-Bash.) Thử file_path, rồi notebook_path (NotebookEdit) fallback.
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+if [ -z "$FILE_PATH" ]; then
+  FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"notebook_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+fi
 
-# Không có file_path → tool khác (không phải Edit/Write file) → pass
+# Không có path → tool không sửa file có tên (hoặc payload lạ) → pass
 if [ -z "$FILE_PATH" ]; then exit 0; fi
 
 # Basename để check pattern
