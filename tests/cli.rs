@@ -266,3 +266,50 @@ fn p003_dot_environment_allowed() {
         .assert()
         .code(0);
 }
+
+// ── P004 fire-test fixtures (P057 verify-cò) ─────────────────────────────────
+//
+// Integration tests cover only gh-FREE paths (oracle L31, L42, L47, L54).
+// gh-dependent paths (fail-CLOSED BLOCK, verdict paths) require network/auth
+// and must be verified manually against `bash scripts/block-unsafe-merge.sh`.
+
+/// Case 1: command `echo hi` -> not a merge command -> exit 0
+#[test]
+fn p004_non_merge_command_allows() {
+    bin()
+        .arg("block-unsafe-merge")
+        .write_stdin(r#"{"tool_input":{"command":"echo hi"}}"#)
+        .assert()
+        .code(0);
+}
+
+/// Case 2: override marker present -> warning stderr + exit 0
+#[test]
+fn p004_override_marker_allows() {
+    bin()
+        .arg("block-unsafe-merge")
+        .write_stdin(r#"{"tool_input":{"command":"gh pr merge 9 [security-review-skip:test]"}}"#)
+        .assert()
+        .code(0);
+}
+
+/// Case 3: empty stdin -> no command -> exit 0 (fail-open, oracle L31)
+#[test]
+fn p004_empty_stdin_allows() {
+    bin()
+        .arg("block-unsafe-merge")
+        .write_stdin("")
+        .assert()
+        .code(0);
+}
+
+/// Case 4: `gh pr merge --merge` (no number) -> parse_merge_pr returns None -> exit 0
+/// (known limitation / bypass, oracle L15-16, intentional)
+#[test]
+fn p004_branch_only_form_allows() {
+    bin()
+        .arg("block-unsafe-merge")
+        .write_stdin(r#"{"tool_input":{"command":"gh pr merge --merge"}}"#)
+        .assert()
+        .code(0);
+}

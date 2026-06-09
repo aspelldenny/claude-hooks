@@ -2,6 +2,18 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.4.0 — P004 block-unsafe-merge port — 2026-06-09
+
+- **P004**: Port `block-unsafe-merge` subcmd 1:1 from `scripts/block-unsafe-merge.sh`. Security-surface guard: blocks `gh pr merge <N>` when the PR touches security-surface files without a `/security-review APPROVE` comment.
+  - `src/io.rs`: added `#[serde(default)] pub command: Option<String>` to `ToolInput` — additive (P002/P003 payloads parse OK via `serde(default)`). Shared harness change; P006/P007 may reuse.
+  - `src/hooks/mod.rs`: replaced stub `block_unsafe_merge()` with full 8-step pipeline: stdin parse via `command` field, `parse_merge_pr` (numbered form only), `extract_skip_marker` (override), `SECURITY_SURFACE_EXTRA` env extend, gh call #1 (`gh pr diff --name-only`), `touches_security_surface` (two-branch), gh call #2 (`gh pr view --json comments`), `verdict_is_approve`. Verbatim oracle messages (tiếng Việt + `⛔`/`⚠️`).
+  - **FAIL-CLOSED divergence (intentional):** gh diff fail/empty → `BLOCK` exit 2 (oracle L68-83). This is the **opposite** of `architect-guard`/`block-env-edit`/`session-banner` (all fail-open). Do NOT change to fail-open — this design is the hook's core security property.
+  - `security_surface`: two-branch check — (a) base pattern `\.env[^.]` etc., (b) `^\.env` non-example fallback catches `.env.local` and similar that pattern (a) misses.
+  - `tests/cli.rs`: 4 new P004 integration test fixtures (gh-free paths): non-merge command, override marker, empty stdin, branch-only bypass.
+  - `src/hooks/mod.rs`: 22 unit tests for all 4 pure helpers: `parse_merge_pr` (5 cases), `extract_skip_marker` (3), `touches_security_surface` (10), `verdict_is_approve` (4).
+  - Docs Gate (Tầng 1 — security-surface): `docs/ARCHITECTURE.md` — `block-unsafe-merge` status stub→real; new section with pipeline, fail-CLOSED note, security-surface pattern; stdin-JSON Harness updated with `command` field; Data Flow updated.
+  - **Conscious parity gap:** env-fallback `CLAUDE_TOOL_INPUT` (oracle L24-28) not ported — same decision as P002/P003. See `docs/discoveries/P004.md`.
+
 ## v0.3.0 — P003 block-env-edit port — 2026-06-09
 
 - **P003**: Port `block-env-edit` subcmd 1:1 from `scripts/block-env-edit.sh`. Security-surface guard: blocks Edit/Write to `.env*` files (except `.env.example`) to prevent secret leak into prompt/context/log.

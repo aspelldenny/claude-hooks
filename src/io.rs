@@ -4,9 +4,17 @@ use serde::Deserialize;
 #[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 pub struct ToolInput {
+    #[serde(default)]
     pub file_path: Option<String>,
+    #[serde(default)]
     pub pattern: Option<String>,
+    #[serde(default)]
     pub notebook_path: Option<String>,
+    /// Bash-tool payload field: `{"tool_input":{"command":"gh pr merge 42"}}`.
+    /// Added P004 — used by block_unsafe_merge(). Additive: P002/P003 payloads
+    /// without this field parse OK via serde(default).
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 /// Wrapper for Claude Code PreToolUse JSON payload.
