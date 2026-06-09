@@ -14,8 +14,12 @@ use crate::io::Decision;
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema, Default)]
 struct GuardInput {
+    /// P010: top-level tool_name dispatch (Read/Glob vs Write/Edit). None → default allow.
+    tool_name: Option<String>,
     file_path: Option<String>,
     pattern: Option<String>,
+    /// P010: Glob search root (`path` field from tool_input). None → skip.
+    path: Option<String>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema, Default)]
@@ -95,7 +99,12 @@ impl HooksServer {
         description = "Check Architect envelope: block Read/Glob to source paths when architect-active marker present. Returns block decision + reason."
     )]
     fn architect_guard(&self, Parameters(i): Parameters<GuardInput>) -> Json<DecisionOutput> {
-        Json(hooks::architect_guard_decide(i.file_path.as_deref(), i.pattern.as_deref()).into())
+        Json(hooks::architect_guard_decide(
+            i.tool_name.as_deref(),
+            i.file_path.as_deref(),
+            i.pattern.as_deref(),
+            i.path.as_deref(),
+        ).into())
     }
 
     #[tool(
@@ -130,9 +139,16 @@ impl HooksServer {
         let ti = &i.tool_input;
         let (hook, d): (&str, crate::io::Decision) = match i.tool_name.as_str() {
             // Read | Glob → architect_guard (settings.json matcher, anchor #4)
+            // why_blocked passes tool_name + all path fields (P010: 4-arg signature).
+            // Routing itself is UNCHANGED (Tension 3 = bounded): Write/Edit → block_env_edit only.
             "Read" | "Glob" => (
                 "architect_guard",
-                hooks::architect_guard_decide(ti.file_path.as_deref(), ti.pattern.as_deref()),
+                hooks::architect_guard_decide(
+                    Some(i.tool_name.as_str()),
+                    ti.file_path.as_deref(),
+                    ti.pattern.as_deref(),
+                    None,  // why_blocked ToolInputArg has no `path` field — limitation noted in Discovery
+                ),
             ),
             // Edit | Write | MultiEdit | NotebookEdit → block_env_edit (anchor #4 — all 4 tool_names)
             "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => (

@@ -77,6 +77,7 @@ fn cleanup(dir: &std::path::Path) {
 }
 
 /// Case 1: marker present + src/main.rs -> exit 2 (BLOCK)
+/// P010: added "tool_name":"Read" — real Claude Code payload always has tool_name (Tension 1).
 #[test]
 fn p002_marker_src_file_blocked() {
     let temp = make_temp_dir("case1");
@@ -84,13 +85,14 @@ fn p002_marker_src_file_blocked() {
     bin()
         .arg("architect-guard")
         .env("CLAUDE_PROJECT_DIR", &temp)
-        .write_stdin(r#"{"tool_input":{"file_path":"src/main.rs"}}"#)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"src/main.rs"}}"#)
         .assert()
         .code(2);
     cleanup(&temp);
 }
 
 /// Case 2: marker present + README.md -> exit 0 (.md always allowed)
+/// P010: added "tool_name":"Read" for accurate payload (Tension 1). Still exit 0 (.md early-allow).
 #[test]
 fn p002_marker_md_file_allowed() {
     let temp = make_temp_dir("case2");
@@ -98,13 +100,14 @@ fn p002_marker_md_file_allowed() {
     bin()
         .arg("architect-guard")
         .env("CLAUDE_PROJECT_DIR", &temp)
-        .write_stdin(r#"{"tool_input":{"file_path":"README.md"}}"#)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"README.md"}}"#)
         .assert()
         .code(0);
     cleanup(&temp);
 }
 
-/// Case 3: marker present + pattern src/**/*.rs -> exit 2 (path via pattern fallback)
+/// Case 3: marker present + pattern src/**/*.rs -> exit 2 (Glob pattern forbidden)
+/// P010: added "tool_name":"Glob" — real Claude Code Glob payload (Tension 1).
 #[test]
 fn p002_marker_pattern_src_blocked() {
     let temp = make_temp_dir("case3");
@@ -112,13 +115,14 @@ fn p002_marker_pattern_src_blocked() {
     bin()
         .arg("architect-guard")
         .env("CLAUDE_PROJECT_DIR", &temp)
-        .write_stdin(r#"{"tool_input":{"pattern":"src/**/*.rs"}}"#)
+        .write_stdin(r#"{"tool_name":"Glob","tool_input":{"pattern":"src/**/*.rs"}}"#)
         .assert()
         .code(2);
     cleanup(&temp);
 }
 
 /// Case 4: marker present + docs/x.txt -> exit 0 (default allow, not in forbidden set)
+/// P010: added "tool_name":"Read" for accurate payload (Tension 1). Still exit 0.
 #[test]
 fn p002_marker_docs_txt_allowed() {
     let temp = make_temp_dir("case4");
@@ -126,13 +130,14 @@ fn p002_marker_docs_txt_allowed() {
     bin()
         .arg("architect-guard")
         .env("CLAUDE_PROJECT_DIR", &temp)
-        .write_stdin(r#"{"tool_input":{"file_path":"docs/x.txt"}}"#)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"docs/x.txt"}}"#)
         .assert()
         .code(0);
     cleanup(&temp);
 }
 
 /// Case 5: NO marker + src/main.rs -> exit 0 (marker gate allows all when no marker)
+/// P010: added "tool_name":"Read" for accurate payload (Tension 1). Still exit 0 (no marker).
 #[test]
 fn p002_no_marker_src_allowed() {
     let temp = make_temp_dir("case5");
@@ -140,7 +145,7 @@ fn p002_no_marker_src_allowed() {
     bin()
         .arg("architect-guard")
         .env("CLAUDE_PROJECT_DIR", &temp)
-        .write_stdin(r#"{"tool_input":{"file_path":"src/main.rs"}}"#)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"src/main.rs"}}"#)
         .assert()
         .code(0);
     cleanup(&temp);
@@ -429,4 +434,172 @@ fn p005_fallback_header_shows_note() {
     );
 
     let _ = std::fs::remove_dir_all(&temp);
+}
+
+// ── P010 fire-test fixtures (P057 verify-cò, TRUE parity tarot) ──────────────
+//
+// All tests with marker use isolated CLAUDE_PROJECT_DIR (same P002 pattern).
+// Verify-cò matrix: Read/Glob forbidden + Write/Edit allowlist + dispatch-default.
+
+// ── P010 Write/Edit guard ─────────────────────────────────────────────────────
+
+/// Write src/foo.ts → marker present → exit 2 (block_write: not in allowlist)
+#[test]
+fn p010_write_src_file_blocked() {
+    let temp = make_temp_dir("p010_w1");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Write","tool_input":{"file_path":"src/foo.ts"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Edit CLAUDE.md → marker present → exit 2 (block_write: not in allowlist)
+#[test]
+fn p010_edit_claude_md_blocked() {
+    let temp = make_temp_dir("p010_w2");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Edit","tool_input":{"file_path":"CLAUDE.md"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Write docs/ticket/P010-x.md → marker present → exit 0 (phiếu allowlist)
+#[test]
+fn p010_write_phieu_file_allowed() {
+    let temp = make_temp_dir("p010_w3");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Write","tool_input":{"file_path":"docs/ticket/P010-x.md"}}"#)
+        .assert()
+        .code(0);
+    cleanup(&temp);
+}
+
+/// Write docs/ticket/TICKET_TEMPLATE.md → marker present → exit 2 (explicit deny)
+#[test]
+fn p010_write_ticket_template_blocked() {
+    let temp = make_temp_dir("p010_w4");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Write","tool_input":{"file_path":"docs/ticket/TICKET_TEMPLATE.md"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Edit with no file_path (empty tool_input) → marker present → exit 0 (defensive allow, oracle L111)
+#[test]
+fn p010_edit_no_path_allowed() {
+    let temp = make_temp_dir("p010_w5");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Edit","tool_input":{}}"#)
+        .assert()
+        .code(0);
+    cleanup(&temp);
+}
+
+// ── P010 Read/Glob superset (prisma, sql, path root) ─────────────────────────
+
+/// Glob pattern src/** → marker present → exit 2
+#[test]
+fn p010_glob_pattern_src_blocked() {
+    let temp = make_temp_dir("p010_r1");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Glob","tool_input":{"pattern":"src/**"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Glob path prisma/ (Glob search root) → marker present → exit 2 (prisma/ new P010)
+#[test]
+fn p010_glob_path_prisma_blocked() {
+    let temp = make_temp_dir("p010_r2");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Glob","tool_input":{"path":"prisma/"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Read prisma/schema.prisma → marker present → exit 2 (.prisma ext new P010)
+#[test]
+fn p010_read_prisma_schema_blocked() {
+    let temp = make_temp_dir("p010_r3");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"prisma/schema.prisma"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Read db/x.sql → marker present → exit 2 (.sql ext new P010)
+#[test]
+fn p010_read_sql_file_blocked() {
+    let temp = make_temp_dir("p010_r4");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"db/x.sql"}}"#)
+        .assert()
+        .code(2);
+    cleanup(&temp);
+}
+
+/// Read README.md → marker present → exit 0 (.md early-allow)
+#[test]
+fn p010_read_readme_md_allowed() {
+    let temp = make_temp_dir("p010_r5");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_name":"Read","tool_input":{"file_path":"README.md"}}"#)
+        .assert()
+        .code(0);
+    cleanup(&temp);
+}
+
+// ── P010 dispatch default (no tool_name → ALLOW, faithful tarot oracle L118) ──
+
+/// NO tool_name in payload + src/foo.ts + marker → exit 0
+/// This is INTENDED behavior: real Claude Code payload always has tool_name.
+/// Payloads without tool_name fall to case default → ALLOW (oracle case default).
+/// Test name documents this is NOT a bug — it is faithful tarot port.
+#[test]
+fn p010_no_tool_name_allows_even_src_path() {
+    let temp = make_temp_dir("p010_d1");
+    place_marker(&temp);
+    bin()
+        .arg("architect-guard")
+        .env("CLAUDE_PROJECT_DIR", &temp)
+        .write_stdin(r#"{"tool_input":{"file_path":"src/foo.ts"}}"#)
+        .assert()
+        .code(0);
+    cleanup(&temp);
 }

@@ -18,7 +18,7 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
 
 **Stdin payload shape:**
 ```json
-{ "tool_input": { "file_path": "...", "pattern": "...", "notebook_path": "...", "command": "..." } }
+{ "tool_name": "Read", "tool_input": { "file_path": "...", "pattern": "...", "path": "...", "notebook_path": "...", "command": "..." } }
 ```
 
 **Exit codes:** `0` = allow, `2` = block (reason on stderr).
@@ -27,7 +27,7 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
 
 | Subcommand | Trigger | Block condition |
 |---|---|---|
-| `architect-guard` | `Read`, `Glob` | Architect-active marker present + path is source/test file |
+| `architect-guard` | `Read`, `Glob`, `Write`, `Edit` | Architect-active marker present + (Read/Glob: path is source/test/prisma/sql file) or (Write/Edit: path not in `docs/ticket/P*-*.md` allowlist) |
 | `block-env-edit` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit` | Target path matches `^\.env($|\.)` (except `.env.example`) |
 | `block-unsafe-merge` | `Bash` | `gh pr merge <N>` on security-surface PR without `/security-review APPROVE` |
 | `session-banner` | `SessionStart` | Never blocks — renders informational banner to stdout, always exits 0 |
@@ -49,7 +49,7 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Glob",
+        "matcher": "Read|Glob|Write|Edit",
         "hooks": [{ "type": "command", "command": "claude-hooks architect-guard" }]
       },
       {
@@ -75,7 +75,7 @@ All subcommands read a JSON payload from **stdin** (Claude Code PreToolUse forma
 
 | Tool | Input | Output | Description |
 |---|---|---|---|
-| `architect_guard` | `{ file_path?, pattern? }` | `{ blocked, exit_code, reason? }` | Marker gate + forbidden path check |
+| `architect_guard` | `{ tool_name?, file_path?, pattern?, path? }` | `{ blocked, exit_code, reason? }` | Marker gate + tool_name dispatch + forbidden/allowed path check |
 | `block_env_edit` | `{ file_path?, notebook_path? }` | `{ blocked, exit_code, reason? }` | `.env*` edit block (not `.env.example`) |
 | `block_unsafe_merge` | `{ command? }` | `{ blocked, exit_code, reason? }` | PR merge security check (real gh calls, fail-CLOSED) |
 | `session_banner` | `{}` | `{ banner: string }` | Full banner rendered from fs/git state |

@@ -1,86 +1,167 @@
 use crate::io::{self, ALLOW, BLOCK, Decision};
 use regex::Regex;
 
-/// Core: marker gate + forbidden path check. Reads fs (marker + CLAUDE_PROJECT_DIR) but
-/// does NOT read stdin, print, or exit. Returns Decision.
-pub fn architect_guard_decide(file_path: Option<&str>, pattern: Option<&str>) -> Decision {
+// ── P010: architect_guard helpers (pure, testable) ────────────────────────────
+
+/// Returns true if path `p` (already stripped of leading `./`) is in the forbidden
+/// Read/Glob zone. Port verbatim oracle tarot L39-50.
+fn is_forbidden_for_read(p: &str) -> bool {
+    // Source dirs: prefix or segment
+    if p.starts_with("src/") || p.starts_with("lib/") || p.starts_with("app/") || p.starts_with("pkg/") {
+        return true;
+    }
+    if p.contains("/src/") || p.contains("/lib/") || p.contains("/app/") || p.contains("/pkg/") {
+        return true;
+    }
+    // crates/*/src/* (segment form)
+    if p.starts_with("crates/") && p.contains("/src/") {
+        return true;
+    }
+    // prisma/ — NEW vs old port (oracle L43)
+    if p.starts_with("prisma/") || p.contains("/prisma/") {
+        return true;
+    }
+    // Test dirs
+    if p.starts_with("tests/") || p.starts_with("test/") || p.starts_with("__tests__/") {
+        return true;
+    }
+    if p.contains("/tests/") || p.contains("/test/") {
+        return true;
+    }
+    // Build artifacts (prefix only)
+    if p.starts_with("node_modules/") || p.starts_with("target/") || p.starts_with("dist/")
+        || p.starts_with("build/") || p.starts_with(".next/") || p.starts_with(".nuxt/")
+        || p.starts_with(".svelte-kit/")
+    {
+        return true;
+    }
+    // Code extensions
+    if p.ends_with(".rs") || p.ends_with(".ts") || p.ends_with(".tsx")
+        || p.ends_with(".js") || p.ends_with(".jsx") || p.ends_with(".py")
+        || p.ends_with(".go") || p.ends_with(".java") || p.ends_with(".cpp")
+        || p.ends_with(".c") || p.ends_with(".h") || p.ends_with(".hpp")
+    {
+        return true;
+    }
+    // .prisma / .sql — NEW vs old port (oracle L47)
+    if p.ends_with(".prisma") || p.ends_with(".sql") {
+        return true;
+    }
+    false
+}
+
+/// Returns true if path `p` (already stripped of leading `./`) is in the Architect Write
+/// allowlist. Port verbatim oracle tarot L54-61. ORDER MATTERS: deny TICKET_TEMPLATE first.
+fn is_allowed_for_write(p: &str) -> bool {
+    // Explicit deny — template is reference, not a phiếu (defense-in-depth, oracle L57)
+    if p == "docs/ticket/TICKET_TEMPLATE.md" {
+        return false;
+    }
+    // Allow phiếu files: docs/ticket/P*-*.md or */docs/ticket/P*-*.md (oracle L58)
+    // Pattern: prefix literal "docs/ticket/P", has at least one '-', ends with ".md"
+    let is_phieu = |s: &str| -> bool {
+        let short = s.strip_prefix("docs/ticket/P").is_some();
+        let long = s.contains("/docs/ticket/P");
+        (short || long)
+            && s.contains('-')
+            && s.ends_with(".md")
+    };
+    is_phieu(p)
+}
+
+/// block_read message — verbatim oracle tarot L65-76. `violator` = original candidate (pre-strip).
+fn make_block_read_msg(violator: &str) -> String {
+    format!(
+        "🚫 Architect envelope violation (Read/Glob)\n\nArchitect cannot read source code: {violator}\n\nWhat to do instead: write a Task 0 anchor in the phiếu.\nExample:\n  | # | Assumption | Verify by | Result |\n  | 1 | <claim about {violator}> | grep ... {violator} | ⏳ TO VERIFY |\n\nWorker (separate subagent) will grep-verify it for you. The constraint IS the feature."
+    )
+}
+
+/// block_write message — verbatim oracle tarot L82-92. `violator` = file_path.
+fn make_block_write_msg(violator: &str) -> String {
+    format!(
+        "🚫 Architect envelope violation (Write/Edit)\n\nArchitect cannot Write/Edit: {violator}\n\nArchitect's Write allowlist (per architect.md line 32):\n  - docs/ticket/P*-*.md  (phiếu files only)\n\nEverything else (src/, CLAUDE.md, BACKLOG.md, CHANGELOG.md, guides) belongs to Worker.\nIf a phiếu needs to update those files, encode it as a Worker Task in the phiếu."
+    )
+}
+
+/// Core: marker gate + tool_name dispatch + forbidden/allowed path check.
+/// Reads fs (marker + CLAUDE_PROJECT_DIR) but does NOT read stdin, print, or exit.
+/// Returns Decision. Port verbatim oracle tarot 119-line.
+///
+/// Signature extended P010: tool_name dispatch (Read/Glob vs Write/Edit).
+/// Divergence from tarot oracle (intentional):
+///   - Marker path: `.sos-state/architect-active` (binary convention, F-005 defer).
+///     Oracle tarot uses `.claude/.architect-active` (L22). KHÔNG đổi ở P010.
+pub fn architect_guard_decide(
+    tool_name: Option<&str>,
+    file_path: Option<&str>,
+    pattern: Option<&str>,
+    path: Option<&str>,
+) -> Decision {
     // Step 1 — resolve repo root from CLAUDE_PROJECT_DIR (fallback: cwd).
     let repo_root = std::env::var("CLAUDE_PROJECT_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
-    // Step 2 — marker gate. Oracle L28.
+    // Step 2 — marker gate. Oracle L25.
     let marker = repo_root.join(".sos-state/architect-active");
     if !marker.exists() {
         return Decision { exit_code: ALLOW, blocked: false, reason: None };
     }
 
-    // Step 3 — resolve path: file_path priority, fallback to pattern. Oracle L38-41.
-    let path = match file_path.or(pattern) {
-        Some(p) => p.to_owned(),
-        None => return Decision { exit_code: ALLOW, blocked: false, reason: None },
-    };
-
-    // Step 4 — strip leading "./". Oracle L47.
-    let norm = path.strip_prefix("./").unwrap_or(&path).to_owned();
-
-    // Step 5 — .md anywhere -> ALLOW (docs are Architect's domain). Oracle L50-52.
-    if norm.ends_with(".md") {
-        return Decision { exit_code: ALLOW, blocked: false, reason: None };
+    // Step 3 — tool_name dispatch. Oracle L96-116.
+    match tool_name {
+        Some("Read") | Some("Glob") => {
+            // Read/Glob branch: check 3 candidates. Oracle L98-107.
+            for candidate in [file_path, pattern, path].iter().flatten() {
+                if candidate.is_empty() {
+                    continue;
+                }
+                // Strip leading "./"
+                let np = candidate.strip_prefix("./").unwrap_or(candidate);
+                // .md early-allow (oracle L103)
+                if np.ends_with(".md") {
+                    continue;
+                }
+                if is_forbidden_for_read(np) {
+                    return Decision {
+                        exit_code: BLOCK,
+                        blocked: true,
+                        reason: Some(make_block_read_msg(candidate)),
+                    };
+                }
+            }
+            Decision { exit_code: ALLOW, blocked: false, reason: None }
+        }
+        Some("Write") | Some("Edit") => {
+            // Write/Edit branch. Oracle L109-115.
+            let fp = match file_path {
+                Some(f) if !f.is_empty() => f,
+                // No path → can't validate, allow (defensive — oracle L111)
+                _ => return Decision { exit_code: ALLOW, blocked: false, reason: None },
+            };
+            let np = fp.strip_prefix("./").unwrap_or(fp);
+            if !is_allowed_for_write(np) {
+                return Decision {
+                    exit_code: BLOCK,
+                    blocked: true,
+                    reason: Some(make_block_write_msg(fp)),
+                };
+            }
+            Decision { exit_code: ALLOW, blocked: false, reason: None }
+        }
+        // Default: no tool_name or unknown tool → allow. Oracle L118 default.
+        _ => Decision { exit_code: ALLOW, blocked: false, reason: None },
     }
-
-    // Step 6 — forbidden pattern check. Oracle L56-67.
-    let blocked =
-        norm.starts_with("src/")
-        || norm.starts_with("lib/")
-        || norm.starts_with("app/")
-        || norm.starts_with("pkg/")
-        || norm.contains("/src/")
-        || norm.contains("/lib/")
-        || norm.contains("/app/")
-        || norm.contains("/pkg/")
-        || norm.starts_with("tests/")
-        || norm.starts_with("test/")
-        || norm.starts_with("__tests__/")
-        || norm.contains("/tests/")
-        || norm.contains("/test/")
-        || norm.starts_with("node_modules/")
-        || norm.starts_with("target/")
-        || norm.starts_with("dist/")
-        || norm.starts_with("build/")
-        || norm.starts_with(".next/")
-        || norm.starts_with(".nuxt/")
-        || norm.starts_with(".svelte-kit/")
-        || norm.ends_with(".rs")
-        || norm.ends_with(".ts")
-        || norm.ends_with(".tsx")
-        || norm.ends_with(".js")
-        || norm.ends_with(".jsx")
-        || norm.ends_with(".py")
-        || norm.ends_with(".go")
-        || norm.ends_with(".java")
-        || norm.ends_with(".cpp")
-        || norm.ends_with(".c")
-        || norm.ends_with(".h")
-        || norm.ends_with(".hpp");
-
-    // Step 7 — blocked -> build reason. Oracle L69-83.
-    if blocked {
-        let msg = format!(
-            "🚫 Architect envelope violation\n\nArchitect cannot read source code: {path}\n\nWhat to do instead: write a Task 0 anchor in the phiếu.\nExample:\n  | # | Assumption | Verify by | Result |\n  | 1 | <claim about {path}> | grep ... {path} | ⏳ TO VERIFY |\n\nWorker (separate subagent) will grep-verify it for you. The constraint IS the feature."
-        );
-        return Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) };
-    }
-
-    Decision { exit_code: ALLOW, blocked: false, reason: None }
 }
 
-/// CLI wrapper — hành vi cũ y nguyên (reads stdin, prints stderr, returns exit code).
+/// CLI wrapper — reads stdin, calls _decide with 4 args (P010), prints stderr, returns exit code.
 pub fn architect_guard() -> i32 {
     let p = io::read_payload();
     let d = architect_guard_decide(
+        p.tool_name.as_deref(),
         p.tool_input.file_path.as_deref(),
         p.tool_input.pattern.as_deref(),
+        p.tool_input.path.as_deref(),
     );
     if let Some(ref r) = d.reason { eprintln!("{r}"); }
     d.exit_code

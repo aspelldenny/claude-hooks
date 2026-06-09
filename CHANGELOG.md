@@ -2,6 +2,21 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.9.0 — P010 architect-guard TRUE parity tarot (fix F-004) — 2026-06-09
+
+- **P010**: architect-guard TRUE parity tarot: tool_name dispatch + Write/Edit allowlist branch (`docs/ticket/P*-*.md` only, deny TICKET_TEMPLATE) + Read/Glob superset (prisma/ + `*.prisma`/`*.sql` + Glob `path` root) + 2 block messages (read/write). Fix F-004.
+  - **tool_name dispatch** (`src/hooks/mod.rs`): `architect_guard_decide` signature extended to 4-arg: `(tool_name, file_path, pattern, path)`. Dispatch on `tool_name`: `Read|Glob` → Read/Glob branch (3 candidates: file_path, pattern, path); `Write|Edit` → Write/Edit allowlist branch; `_` (None/unknown) → default ALLOW (real Claude Code payload always has tool_name — no-tool_name = default ALLOW is faithful tarot).
+  - **Read/Glob superset** (`is_forbidden_for_read`): added `prisma/*|*/prisma/*` (oracle L43) and `*.prisma|*.sql` (oracle L47) to existing forbidden set. Added `path` (Glob search root) as 3rd candidate alongside `file_path` and `pattern`.
+  - **Write/Edit branch** (new — `is_allowed_for_write`): deny `docs/ticket/TICKET_TEMPLATE.md` FIRST (explicit, defense-in-depth); allow `docs/ticket/P*-*.md|*/docs/ticket/P*-*.md`; else block. No-path → ALLOW (defensive, oracle L111).
+  - **2 block messages** (verbatim oracle): `block_read` (Read/Glob violation) + `block_write` (Write/Edit violation). Both port byte-verbatim from tarot oracle L65-94.
+  - **Marker GIỮ `.sos-state/architect-active`** (binary convention, F-005 marker-path unify defer).
+  - **`src/io.rs`**: `HookPayload` +`tool_name: Option<String>` (top-level, `#[serde(default)]`); `ToolInput` +`path: Option<String>` (Glob root, `#[serde(default)]`).
+  - **`src/serve.rs`**: `GuardInput` +`tool_name`+`path`; `architect_guard` tool passes 4-arg; `why_blocked` Read|Glob branch updated to pass tool_name.
+  - **`scripts/architect-guard.sh`**: synced to tarot 119-line version with MARKER divergence `.sos-state/` (F-005 defer, noted in comment).
+  - **Tests (Tension 1)**: updated 5 P002 cli.rs tests to add `"tool_name":"Read"/"Glob"` (real payload shape); updated `mcp_handshake.rs::run_architect_guard` helper. Added 11 P010 integration tests: Write/Edit cases (5) + Read/Glob superset (5) + dispatch-default no-tool_name test (1). Updated `decide_architect_guard_marker_src_blocks` in mcp_handshake.rs.
+  - **Total tests: 104** (49 unit + 43 cli.rs + 12 mcp_handshake.rs) — all pass. Parity verified vs `bash ~/tarot/scripts/architect-guard.sh` (12/12 cases, exit code + stderr message verbatim).
+  - Docs Gate (Tầng 1 — hook security-surface): `docs/ARCHITECTURE.md` architect-guard section updated (tool_name dispatch + Write/Edit allowlist + Read/Glob superset + 2 messages + why_blocked limitation note). stdin-JSON Harness updated (tool_name, path fields). MCP tool table updated.
+
 ## v0.8.0 — P008 ship prep: serverInfo.name fix + README + version bump — 2026-06-09
 
 - **P008**: Release prep — 4 fixes before `cargo publish`. Phase 4 ship-prep DONE.

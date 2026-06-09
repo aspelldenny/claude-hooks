@@ -15,6 +15,11 @@ pub struct ToolInput {
     /// without this field parse OK via serde(default).
     #[serde(default)]
     pub command: Option<String>,
+    /// Glob-tool search root: `{"tool_input":{"path":"prisma/"}}`.
+    /// Added P010 — used by architect_guard_decide() to check Glob `path` candidate.
+    /// Additive: pre-P010 payloads without this field parse OK via serde(default).
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// Wrapper for Claude Code PreToolUse JSON payload.
@@ -22,6 +27,11 @@ pub struct ToolInput {
 #[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 pub struct HookPayload {
+    /// Top-level tool name from Claude Code PreToolUse payload: `{"tool_name":"Read","tool_input":{...}}`.
+    /// Added P010 — used by architect_guard_decide() for tool_name dispatch.
+    /// Additive: pre-P010 payloads without this field parse OK via serde(default) → None.
+    #[serde(default)]
+    pub tool_name: Option<String>,
     #[serde(default)]
     pub tool_input: ToolInput,
 }

@@ -149,9 +149,11 @@ fn run_architect_guard(
     use std::io::Write;
 
     let binary = assert_cmd::cargo::cargo_bin("claude-hooks");
+    // P010: include tool_name in payload so dispatch fires correctly (Tension 1).
+    // file_path → tool_name="Read"; pattern → tool_name="Glob"; neither → no tool_name.
     let payload = match (file_path, pattern) {
-        (Some(fp), _) => format!(r#"{{"tool_input":{{"file_path":"{fp}"}}}}"#),
-        (None, Some(p)) => format!(r#"{{"tool_input":{{"pattern":"{p}"}}}}"#),
+        (Some(fp), _) => format!(r#"{{"tool_name":"Read","tool_input":{{"file_path":"{fp}"}}}}"#),
+        (None, Some(p)) => format!(r#"{{"tool_name":"Glob","tool_input":{{"pattern":"{p}"}}}}"#),
         (None, None) => "{}".to_owned(),
     };
 
