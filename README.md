@@ -108,13 +108,22 @@ Fail-open by default (all hooks except `block-unsafe-merge`). `block-unsafe-merg
 
 > ⚠️ **Deployment caveat — keep the binary on `PATH`.** If `claude-hooks` is **not installed** (e.g. a fresh machine that hasn't run your setup script), a hook command like `claude-hooks block-unsafe-merge` resolves to *command-not-found* → shell exit `127`, which the harness treats as non-blocking (allow). That silently turns the **fail-CLOSED** `block-unsafe-merge` gate **fail-OPEN** *before any code runs*. The binary cannot self-defend against its own absence — guard it at the wiring layer.
 >
-> **Recommended for high-stakes (fail-CLOSED) hooks** — wrap the command in a presence-check shim so absence fails CLOSED:
+> **The deployment pattern is the adopter's choice** (for sos-kit downstream repos, it's decided in the sos-kit adoption doctrine — see `docs/handoff/SOS_KIT_HANDOFF.md`). Two reference patterns for the fail-CLOSED hook:
+>
+> *Option A — Bash-fallback wrapper.* Prefer the Rust binary, fall back to the always-present Bash oracle when absent, so the gate stays *functional* (not just blocking) and never fails open:
 > ```bash
 > #!/usr/bin/env bash
-> command -v claude-hooks >/dev/null 2>&1 || { echo "BLOCKED: claude-hooks not on PATH — run your dev-setup script" >&2; exit 2; }
-> exec claude-hooks block-unsafe-merge "$@"
+> # block-unsafe-merge: prefer Rust binary; if absent, run the Bash oracle (always present).
+> if command -v claude-hooks >/dev/null 2>&1; then
+>   exec claude-hooks block-unsafe-merge "$@"
+> fi
+> exec bash "$(dirname "$0")/block-unsafe-merge.sh" "$@"
 > ```
-> Point `.claude/settings.json` at the shim instead of the bare binary, or keep the Bash hook for that one gate until the shim is in place. Lower-stakes fail-open hooks (architect-guard, block-env-edit, session-banner) don't need this.
+> Point `.claude/settings.json` at this wrapper. **Caveat:** keeping a functional Bash fallback means you must keep the `.sh` oracle in **parity** with the binary (and test the fallback path periodically) — an un-exercised fallback can rot silently. The Bash files in this repo are maintained as the port oracles, so parity is already the discipline.
+>
+> *Option B — Fail-closed shim (if you don't want to maintain Bash):* `command -v claude-hooks || { echo BLOCKED >&2; exit 2; }` then `exec claude-hooks ...`. Safer-by-default but blocks even legit merges until the binary is installed.
+>
+> Lower-stakes fail-open hooks (architect-guard, block-env-edit, session-banner) don't need either — if absent they just allow, which is their default.
 
 ## Environment variables
 

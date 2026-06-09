@@ -50,4 +50,38 @@ Grep tìm `docs/CHANGELOG.md`, nhưng repo này (và CLAUDE.md DOCS GATE) để 
 
 ---
 
-*3 finding trên đều REPRODUCIBLE ở claude-hooks. Evidence chi tiết + line refs: `docs/SOS_KIT_FEEDBACK.md`.*
+# 🧭 DECISION cho sos-kit — doctrine adopt binary `claude-hooks` vào downstream
+
+> **Đây là quyết định của sos-kit** (nó sở hữu adoption doctrine cho MỌI downstream, tarot chỉ là repo đầu). claude-hooks (binary) đã xong + sẽ KHÔNG đổi cho việc này. Phần wrapper/distribution sống ở **tầng adopt của sos-kit**, không phải trong binary. Dưới đây là toàn cảnh + option để sos-kit cân, KHÔNG chốt sẵn.
+
+## Bối cảnh
+- `claude-hooks` = 4 hook (architect-guard, block-env-edit, block-unsafe-merge, session-banner), Rust, parity-verified vs bash oracle, v0.9.0, shippable.
+- Cài 1 lần (`cargo install`) → **binary độc lập, chạy KHÔNG cần Rust** (Rust chỉ cần lúc build).
+- claude-hooks repo đã **dogfood**: 4 hook của nó giờ chạy bằng binary (settings.json). `orchestrator-guard` GIỮ bash (không phải hook claude-hooks).
+
+## Vấn đề cốt lõi cần doctrine (F-006)
+"Binary có thể VẮNG trên PATH" (máy mới chưa chạy install) chia 2 loại hook:
+- **3 hook fail-OPEN** (architect-guard, block-env-edit, session-banner): vắng → exit 127 → harness allow → mà đằng nào chúng cũng fail-open theo thiết kế → **KHÔNG thêm rủi ro** → wire binary trực tiếp OK.
+- **1 hook fail-CLOSED** (block-unsafe-merge, gác merge security): vắng → exit 127 → harness allow → **gác bảo mật mở toang IM LẶNG**. Đây là case nguy hiểm DUY NHẤT cần doctrine.
+
+## Option space (sos-kit chọn pattern canonical cho fail-CLOSED hook)
+| # | Pattern | Ưu | Nhược |
+|---|---|---|---|
+| 1 | **Bash-fallback wrapper** — ưu tiên binary, vắng thì chạy bash oracle (luôn có) | Gác **vẫn làm việc** khi vắng binary; không fail-open; không phiền | Phải **nuôi bash parity** + bash fallback **mục âm thầm nếu không test** (bài học F-005 — gác bash tarot từng chết) |
+| 2 | **Fail-closed shim** — `command -v claude-hooks \|\| exit 2` | Đơn giản, an toàn mặc định, không nuôi bash | **Chặn cả merge hợp lệ** tới khi cài binary (phiền) |
+| 3 | **Prebuilt binary** (GitHub Releases / Homebrew / cargo-binstall) | Máy consumer **KHÔNG cần Rust** — tải file chạy về; bỏ ma sát "phải compile" | Vẫn có thể vắng nếu chưa tải; nên ghép với (1)/(2) |
+| 4 | **setup-dev enforce** — 1 lệnh bootstrap cài binary mỗi máy | Đảm bảo có mặt | Không cứu nếu **ai đó quên chạy** → ghép (1)/(2) làm dây an toàn |
+
+## Khung gợi ý (để sos-kit cân — KHÔNG phải lệnh)
+- **3 hook fail-open:** wire binary trực tiếp. Xong.
+- **1 hook fail-closed:** cần pattern an toàn-khi-vắng. (1) wrapper giữ gác sống; (2) shim đơn giản hơn. sos-kit chọn theo: có muốn nuôi bash dài hạn không.
+- **Distribution:** cân nhắc mạnh **option 3 (prebuilt)** — "bắt mọi máy cài Rust" mới là rào cản adopt thật, không phải cái wrapper. Prebuilt gỡ rào đó.
+- Dù chọn gì: **bash oracle phải parity-synced với binary** (sos-kit ship cả 2 nếu giữ fallback) — Rust thêm feature (P010 Write/Edit, P011 `..`) thì bash phải theo, không thì fallback hành xử khác âm thầm.
+
+## Liên hệ findings khác
+- F-004/F-005 đã CLOSED (tarot P345 live). F-007 (path-traversal `..`) = hardening low-pri, sync 3 nơi khi làm (binary + 2 oracle) — nếu sos-kit giữ bash fallback, nhớ áp `..`-guard cho cả bash.
+- README claude-hooks (`## Exit convention` → Deployment caveat) có mô tả vấn đề + 2 pattern tham khảo, nhưng **quyết định canonical là ở đây (sos-kit)**.
+
+---
+
+*3 workflow finding (F-001/002/003) + decision deployment trên đều REPRODUCIBLE / grounded ở claude-hooks. Evidence + line refs đầy đủ: `docs/SOS_KIT_FEEDBACK.md`.*
