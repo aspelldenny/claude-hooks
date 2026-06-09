@@ -2,6 +2,16 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.8.0 — P008 ship prep: serverInfo.name fix + README + version bump — 2026-06-09
+
+- **P008**: Release prep — 4 fixes before `cargo publish`. Phase 4 ship-prep DONE.
+  - **`serverInfo.name` fix (MCP)**: handshake previously returned `"name":"rmcp"` (from `Implementation::from_build_env()` expanding at rmcp crate site). Fixed by replacing `#[tool_router(server_handler)]` with `#[tool_router]` + explicit `#[tool_handler] impl ServerHandler for HooksServer { fn get_info() ... }` returning `Implementation::new("claude-hooks", env!("CARGO_PKG_VERSION"))`. Handshake now returns `"name":"claude-hooks","version":"0.8.0"`. Tool routing unchanged — all 93 existing tests pass.
+  - **`README.md`**: replaced 2-line stub with usable English docs: Install, CLI usage (5 subcmd + stdin JSON shape + exit codes + settings.json wire example), MCP mode (5 tools + `why_blocked` description + `.mcp.json` example), exit convention (fail-open default / `block-unsafe-merge` fail-CLOSED).
+  - **`Cargo.toml` version**: `0.1.0` → `0.8.0` (CHANGELOG head was already v0.7.0; P008 = next bump). `env!("CARGO_PKG_VERSION")` in `get_info()` now resolves to "0.8.0" at compile time.
+  - **`Cargo.toml` exclude**: added `exclude` list to slim crate package from ~778KB/101-files to ~148KB/25-files. Excludes `scripts/`, `docs/`, `phieu/`, `.sos-state/`, `.backup/`, `.claude/`, `.github/`, `hooks/pre-commit`, `hooks/pre-push`. `src/hooks/mod.rs` kept (require `hooks` exclude to be file-specific, NOT prefix glob). `tests/` kept (cargo publish verify). `cargo publish --dry-run` clean.
+  - **`docs/ARCHITECTURE.md`**: serve section updated — `#[tool_router(server_handler)]` → `#[tool_router]` + explicit `ServerHandler::get_info()` explanation. Status line added to Overview: Phase 1-3 complete (P001–P007); Phase 4 P008 ship-prep; P009 wire-tarot follow-on.
+  - **Total tests: 93** (49 unit + 32 cli.rs + 12 mcp_handshake.rs) — all pass unchanged (metadata-only change, no behavior delta).
+
 ## v0.7.0 — P007 `why_blocked` composite MCP router — 2026-06-09
 
 - **P007**: Add `why_blocked` as 5th MCP tool in `src/serve.rs`. Phase 3 DONE (P006 + P007 complete).

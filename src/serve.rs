@@ -1,10 +1,11 @@
 // MCP server — rmcp 1.7 stdio JSON-RPC, 5 hook tools (P007: +why_blocked composite router).
 // Decision-core fns live in hooks:: module; this file only maps them to MCP tool output.
 
-use rmcp::{tool_router, tool, ServiceExt, transport};
+use rmcp::{tool_router, tool_handler, tool, ServerHandler, ServiceExt, transport};
 use rmcp::handler::server::wrapper::{Parameters, Json};
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::schemars;
+use rmcp::model::{ServerInfo, Implementation};
 use serde::{Serialize, Deserialize};
 use crate::hooks;
 use crate::io::Decision;
@@ -82,12 +83,12 @@ struct BannerOutput {
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)] // tool_router is accessed by macro-generated ServerHandler impl
+#[allow(dead_code)] // tool_router is accessed by #[tool_handler] macro-generated ServerHandler impl
 struct HooksServer {
     tool_router: ToolRouter<Self>,
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl HooksServer {
     #[tool(
         name = "architect_guard",
@@ -165,6 +166,18 @@ impl HooksServer {
 impl HooksServer {
     fn new() -> Self {
         Self { tool_router: Self::tool_router() }
+    }
+}
+
+// Explicit ServerHandler impl: overrides get_info() to advertise correct server name/version.
+// #[tool_handler] wires self.tool_router into list_tools/call_tool — replaces the server_handler
+// flag that was previously on #[tool_router]. Tool routing is unchanged.
+#[tool_handler]
+impl ServerHandler for HooksServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::default().with_server_info(
+            Implementation::new("claude-hooks", env!("CARGO_PKG_VERSION"))
+        )
     }
 }
 

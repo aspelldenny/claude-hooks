@@ -6,6 +6,8 @@
 It runs in two modes: **CLI** (invoked by Claude Code PreToolUse hooks) and **MCP** (stdio JSON-RPC server for debug tooling).
 The binary name is `claude-hooks`; subcommands are kebab-case.
 
+**Status:** Phase 1-3 complete (P001–P007). Phase 4 ship-prep (P008): README + publish-ready (v0.8.0, serverInfo.name fixed). Phase 4 wire-tarot = P009.
+
 ## CLI Surface
 
 ### Subcommands (5)
@@ -171,10 +173,10 @@ Each hook now has two layers:
 **CLI parity invariant:** the 81 pre-P006 tests pass unchanged — Decision-core refactor is mechanical (move logic, not change behavior).
 
 **MCP server (`src/serve.rs`):**
-- Struct `HooksServer { tool_router: ToolRouter<Self> }` with `#[tool_router(server_handler)]` macro.
+- Struct `HooksServer { tool_router: ToolRouter<Self> }` with `#[tool_router]` macro on the impl block.
 - 5 `#[tool]` methods (sync): 4 direct hook wrappers (P006) + 1 composite router `why_blocked` (P007).
 - `run() -> i32`: builds `tokio::runtime::Builder::new_current_thread().enable_all()` runtime, `block_on(HooksServer::new().serve(transport::stdio()).await?.waiting().await)`. Returns `ALLOW` (0) always.
-- rmcp features used: `server`, `transport-io`, `macros`. Macro `#[tool_router(server_handler)]` emits `ServerHandler` impl automatically.
+- rmcp features used: `server`, `transport-io`, `macros`. `#[tool_router]` registers tool methods; `#[tool_handler] impl ServerHandler` wires tool routing + overrides `get_info()` (P008: returns `name="claude-hooks"`, `version=env!("CARGO_PKG_VERSION")`). Previously `#[tool_router(server_handler)]` auto-generated `ServerHandler` using rmcp build env → name was "rmcp"; explicit impl corrects this.
 
 **5 MCP tools:**
 
@@ -276,7 +278,7 @@ MCP path (P006):
      -> JSON-RPC response
 ```
 
-`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). `serve` (P006): real MCP server (rmcp 1.7 stdio, 4 hook tools via Decision-core). `why_blocked` (P007): composite router tool — routes tool_name → matching `*_decide` per `.claude/settings.json` matchers. All hooks refactored to `*_decide + wrapper` pattern (P006). Phase 3 DONE (P006 + P007).
+`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). `serve` (P006): real MCP server (rmcp 1.7 stdio, 4 hook tools via Decision-core). `why_blocked` (P007): composite router tool — routes tool_name → matching `*_decide` per `.claude/settings.json` matchers. All hooks refactored to `*_decide + wrapper` pattern (P006). Phase 3 DONE (P006 + P007). Phase 4 (P008): `serverInfo.name` fixed ("rmcp" → "claude-hooks") via explicit `#[tool_handler] impl ServerHandler`; v0.8.0 publish-ready.
 
 ## Bash Reference (oracle)
 
