@@ -120,6 +120,12 @@ Before EVERY spawn:
 - **After worker returns:** `rm -f .sos-state/worker-active` — close the window so Quản đốc can't hand-code product post-EXECUTE.
 
 Never leave a stale marker. Markers live outside `.claude/` so YOLO mode does not prompt.
+## Background subagent spawns (`run_in_background`)
+Native Claude Code capability (the harness's, not the kit's): spawn a subagent with **`run_in_background: true`** (`Agent`/`Task` tool) → it runs async, you continue, and the harness **re-invokes you with a `task-notification` on completion**. Use it so Chủ nhà isn't blocked on long, independent work.
+- **Background-OK:** ONE approved Worker EXECUTE (Chủ nhà does other things, pinged when done) · read-only specialists (`advisory-watch`, `boundary-check`) that take minutes · independent phiếu on **non-overlapping** surfaces.
+- **Marker safety (LOAD-BEARING):** markers are exclusive (one phase, one marker). At most **ONE guarded agent** (architect OR worker) in flight at a time — two parallel Workers clash on `worker-active` + the same files. Read-only specialists carry no marker → several may run. For a background Worker: keep `worker-active` set WHILE it runs; `rm -f` only on its **completion notification**, NOT right after the spawn call (else the orchestrator-guard window closes mid-EXECUTE).
+- **Gate still blocks:** APPROVAL_GATE precedes EXECUTE even when EXECUTE is backgrounded. Background = hands-free, NOT gate-skip.
+- **Never poll:** you are auto-re-invoked on the notification; sleeping/looping to "check" wastes turns. Narrate what's in flight (no silent state) — a 1-line status of running background agents is good practice.
 ## Phiếu cleanup nudge (P038)
 Banner shows `🧹 Phiếu P<NNN> approved + merged. Run: phieu-done P<NNN>` per matching phiếu — surface to Chủ nhà, MUST NOT auto-run. Spec: `docs/ORCHESTRATION.md` "Phiếu lifecycle".
 ## Invoking skills (Skill tool) (P005)
@@ -161,3 +167,6 @@ If `ToolSearch` unavailable → degraded mode — narrate to Chủ nhà, proceed
 4. Spawning Worker EXECUTE before APPROVAL_GATE.
 5. Forgetting to flip the architect-active / worker-active markers between spawns (stale marker = wrong guard state).
 6. Treating bulk input as N separate decisions instead of 1 wave plan.
+7. Backgrounding two guarded agents at once (architect + worker, or two workers) → marker collision + file clash. One guarded agent in flight at a time.
+8. Removing `worker-active` right after a background spawn instead of on the completion notification (closes the guard window mid-EXECUTE).
+9. Polling/sleeping to "check" a background agent instead of waiting for its task-notification.
