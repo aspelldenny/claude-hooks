@@ -159,3 +159,110 @@ fn p002_marker_empty_stdin_allowed() {
         .code(0);
     cleanup(&temp);
 }
+
+// ── P003 fire-test fixtures (P057 verify-cò) ─────────────────────────────────
+//
+// block-env-edit does NOT depend on a global marker — no CLAUDE_PROJECT_DIR setup needed.
+// Each fixture feeds stdin JSON and asserts exit code only.
+
+/// Case 1: .env (basename) -> regex match ^\.env$ -> exit 2 (BLOCK)
+#[test]
+fn p003_dot_env_blocked() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":"/x/.env"}}"#)
+        .assert()
+        .code(2);
+}
+
+/// Case 2: .env.example -> allowlist (before regex) -> exit 0
+#[test]
+fn p003_dot_env_example_allowed() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":".env.example"}}"#)
+        .assert()
+        .code(0);
+}
+
+/// Case 3: .envrc -> regex does NOT match ('rc' is neither '$' nor '.') -> exit 0
+/// This is the easiest case to get wrong: must port ($|\.) correctly.
+#[test]
+fn p003_dot_envrc_allowed() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":".envrc"}}"#)
+        .assert()
+        .code(0);
+}
+
+/// Case 4: .env.local -> dot after 'env' matches \. -> exit 2
+#[test]
+fn p003_dot_env_local_blocked() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":".env.local"}}"#)
+        .assert()
+        .code(2);
+}
+
+/// Case 5: .env.production -> dot after 'env' matches \. -> exit 2
+#[test]
+fn p003_dot_env_production_blocked() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":".env.production"}}"#)
+        .assert()
+        .code(2);
+}
+
+/// Case 6: /some/dir/.env -> basename .env -> regex match -> exit 2 (verify Step 5 basename)
+#[test]
+fn p003_absolute_path_dot_env_blocked() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":"/some/dir/.env"}}"#)
+        .assert()
+        .code(2);
+}
+
+/// Case 7: config.yaml -> non-env -> no match -> exit 0
+#[test]
+fn p003_config_yaml_allowed() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":"config.yaml"}}"#)
+        .assert()
+        .code(0);
+}
+
+/// Case 8: notebook_path fallback (NotebookEdit) -> x/.env -> basename .env -> exit 2
+#[test]
+fn p003_notebook_path_fallback_blocked() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"notebook_path":"x/.env"}}"#)
+        .assert()
+        .code(2);
+}
+
+/// Case 9: empty stdin -> fail-open -> exit 0
+#[test]
+fn p003_empty_stdin_allowed() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin("")
+        .assert()
+        .code(0);
+}
+
+/// Case 10 (optional bonus): .environment -> 'ironment' after 'env' is letters, not '$'/'.'
+/// -> regex does NOT match -> exit 0 (same family as .envrc)
+#[test]
+fn p003_dot_environment_allowed() {
+    bin()
+        .arg("block-env-edit")
+        .write_stdin(r#"{"tool_input":{"file_path":".environment"}}"#)
+        .assert()
+        .code(0);
+}

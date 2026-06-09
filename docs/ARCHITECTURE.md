@@ -13,7 +13,7 @@ The binary name is `claude-hooks`; subcommands are kebab-case.
 | Subcommand | Clap variant | Status | Port target |
 |---|---|---|---|
 | `architect-guard` | `Cmd::ArchitectGuard` | real (P002) | — |
-| `block-env-edit` | `Cmd::BlockEnvEdit` | stub (P001) | P003 |
+| `block-env-edit` | `Cmd::BlockEnvEdit` | real (P003) | — |
 | `block-unsafe-merge` | `Cmd::BlockUnsafeMerge` | stub (P001) | P004 |
 | `session-banner` | `Cmd::SessionBanner` | stub (P001) | P005 |
 | `serve` | `Cmd::Serve` | stub (P001) | P006 |
@@ -50,6 +50,27 @@ Ports `scripts/architect-guard.sh` 1:1. Fires on every `Read`/`Glob` PreToolUse 
 **Exit codes:** `0` (ALLOW), `2` (BLOCK — see exit-code table above).
 
 **Block message** (stderr, verbatim oracle): `🚫 Architect envelope violation` + path (original, pre-strip) + instructions for Task 0 anchor workflow.
+
+### `block-env-edit` (P003 — real implementation)
+
+Ports `scripts/block-env-edit.sh` 1:1. Fires on every `Edit`/`Write` PreToolUse call. Guards against secret leak (`.env*` files contain API keys, DB credentials, webhook tokens).
+
+**Pipeline (8 steps):**
+
+1. Read stdin payload via `read_payload()` (fail-open). **Note:** env-fallback `CLAUDE_TOOL_INPUT` (oracle L16-20) intentionally not ported — Claude Code always pipes stdin; see `docs/discoveries/P003.md` for rationale.
+2. Empty payload (empty stdin) → `ALLOW` (fail-open via steps 3-4).
+3. Parse path: `tool_input.file_path` (priority), fallback `tool_input.notebook_path` (NotebookEdit). **No `pattern` field** — this hook does not handle Glob.
+4. No path parsed → `ALLOW` (fail-open).
+5. **Basename:** take last `/`-delimited segment of path. (`/a/b/.env` → `.env`).
+6. **Allowlist:** basename `== ".env.example"` → `ALLOW` (template, no real secrets).
+7. **Block regex:** basename matches `^\.env($|\.)` → `io::block(msg)` (stderr) → `BLOCK` (exit 2).
+   - Matches: `.env`, `.env.local`, `.env.production`, `.env.staging`, …
+   - Does NOT match: `.envrc`, `.environment`, `config.yaml`, …
+8. Else → `ALLOW`.
+
+**Exit codes:** `0` (ALLOW), `2` (BLOCK).
+
+**Block message** (stderr, verbatim oracle L46-59): `⛔ BLOCKED: Edit/Write tới <full-path> bị chặn.` + secret-leak rationale + valid alternatives + override instructions.
 
 ### stdin-JSON Harness (`src/io.rs`)
 
@@ -100,7 +121,7 @@ Claude Code PreToolUse trigger
      -> process::exit(code)
 ```
 
-`architect-guard` (P002): real logic. `block-env-edit` (P003+), `block-unsafe-merge` (P004+), `session-banner` (P005+): still stubs returning ALLOW. Harness wiring unchanged.
+`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004+), `session-banner` (P005+): still stubs returning ALLOW. Harness wiring unchanged.
 
 ## Bash Reference (oracle)
 

@@ -2,6 +2,15 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.3.0 — P003 block-env-edit port — 2026-06-09
+
+- **P003**: Port `block-env-edit` subcmd 1:1 from `scripts/block-env-edit.sh`. Security-surface guard: blocks Edit/Write to `.env*` files (except `.env.example`) to prevent secret leak into prompt/context/log.
+  - `src/hooks/mod.rs`: replaced stub `block_env_edit()` with 8-step logic: stdin parse, `file_path`/`notebook_path` fallback (no `pattern`), basename extraction via `rsplit('/')`, `.env.example` allowlist, regex `^\.env($|\.)` block check, verbatim oracle block message (tiếng Việt + `⛔`), exit 0/2.
+  - Added `use regex::Regex;` — dep already present (`Cargo.toml:20 regex = "1"`), no new dep added.
+  - `tests/cli.rs`: 10 new P003 fire-test fixtures (P057 verify-cò) — no isolation needed (no global marker). Covers: `.env`, `.env.example`, `.envrc`, `.env.local`, `.env.production`, `/some/dir/.env` (basename), `config.yaml`, `notebook_path` fallback, empty stdin, `.environment`.
+  - Docs Gate (Tầng 1 — security-surface): `docs/ARCHITECTURE.md` — `block-env-edit` status stub→real; new section `block-env-edit (P003)` with full pipeline; Data Flow note updated.
+  - **Conscious parity gap:** env-fallback `CLAUDE_TOOL_INPUT` (oracle L16-20) not ported — Claude Code always pipes stdin; env-fallback would require shared `io.rs` harness change (Tầng 1, out of scope). Same decision as P002. See `docs/discoveries/P003.md`.
+
 ## v0.2.0 — P002 architect-guard port — 2026-06-09
 
 - **P002**: Port `architect-guard` subcmd 1:1 from `scripts/architect-guard.sh`.

@@ -1,4 +1,5 @@
 use crate::io::{self, ALLOW};
+use regex::Regex;
 
 pub fn architect_guard() -> i32 {
     // Step 1 — resolve repo root from CLAUDE_PROJECT_DIR (fallback: cwd).
@@ -94,7 +95,53 @@ pub fn architect_guard() -> i32 {
 }
 
 pub fn block_env_edit() -> i32 {
-    let _payload = io::read_payload(); // real logic in P003
+    // Step 1 — read stdin payload. Oracle L16-20.
+    // NOTE: env-fallback CLAUDE_TOOL_INPUT (oracle L16-20) intentionally NOT ported.
+    // Hook always receives stdin from Claude Code; env-fallback requires io.rs harness
+    // change (shared API, Tầng 1 scope). See docs/discoveries/P003.md for full rationale.
+    let payload = io::read_payload();
+
+    // Steps 2-4 — parse path: file_path priority, fallback notebook_path (NotebookEdit).
+    // KHÔNG dùng pattern (oracle L29-32: only file_path / notebook_path for this hook).
+    // Empty payload (empty stdin) -> both fields None -> falls through to return ALLOW below.
+    let path = payload.tool_input.file_path
+        .or(payload.tool_input.notebook_path);
+
+    // Step 4 — no path -> ALLOW (fail-open). Oracle L35.
+    let path = match path {
+        Some(p) if !p.is_empty() => p,
+        _ => return ALLOW,
+    };
+
+    // Step 5 — basename. Oracle L38: BASE=$(basename "$FILE_PATH").
+    // rsplit('/').next() gives last segment: "/a/b/.env" -> ".env", ".env" -> ".env".
+    let base = path.rsplit('/').next().unwrap_or(&path);
+
+    // Step 6 — allowlist: .env.example is a template, allow edit. Oracle L41.
+    if base == ".env.example" {
+        return ALLOW;
+    }
+
+    // Step 7 — block regex ^\.env($|\.). Oracle L44.
+    // Pattern is a constant literal -> unwrap() safe (never fails to compile).
+    let re = Regex::new(r"^\.env($|\.)").unwrap();
+    if re.is_match(base) {
+        let msg = format!(
+            "⛔ BLOCKED: Edit/Write tới {path} bị chặn.\n\n\
+             Lý do: .env* file chứa secret thật (API keys, DB credentials, webhook tokens).\n\
+             KHÔNG sửa qua Claude tool — risk leak vào prompt/context/log.\n\n\
+             Cách hợp lệ:\n\
+             \x20 - Sửa .env.example (template, không secret thật)\n\
+             \x20 - Sếp paste secret thật vào .env tay (local-only edit)\n\
+             \x20 - Sửa qua SSH/console nếu là production env\n\n\
+             Override (nếu thật sự cần Claude edit .env, hiếm):\n\
+             \x20 - Tạm rename .env → .env.draft, edit, rename back\n\
+             \x20 - Hoặc remove hook khỏi .claude/settings.json (PR review trước)"
+        );
+        return io::block(&msg);
+    }
+
+    // Step 8 — else allow. Oracle L64.
     ALLOW
 }
 
