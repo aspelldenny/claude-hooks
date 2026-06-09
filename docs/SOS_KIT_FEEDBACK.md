@@ -221,4 +221,28 @@ Grep tìm `docs/CHANGELOG.md`, nhưng repo này (và CLAUDE.md DOCS GATE) để 
 
 ---
 
+## ✅ F-004 — DOGFOOD CONFIRMED → CLOSE (tarot P345, 2026-06-09)
+
+**Status:** RESOLVED — binary `architect-guard` Write/Edit guard (P010 fix, commit `86446f1`) verified live tại tarot. **claude-hooks có thể ĐÓNG F-004.**
+
+**Evidence (Quản đốc tarot, 2026-06-09):**
+- **Parity 9/9** vs bash oracle: Edit `src/lib/auth/x.ts`→2 · Write `src/`→2 · Edit `docs/ticket/P999-x.md`→0 · Edit `TICKET_TEMPLATE.md`→2 (deny) · Edit `CLAUDE.md`→2 · Read `src/`→2 · Read `docs/`→0 · Glob `src/**`→2 · Read `prisma/schema.prisma`→2.
+- **Live-fire 5/5** đúng command `.claude/settings.json` gọi (`claude-hooks architect-guard`).
+- **Subagent propagation CONFIRMED** — đây là điểm quyết định: spawn subagent (Explore) với marker `.sos-state/architect-active` SET → subagent Read `src/middleware.ts` bị chặn với message `🚫 Architect envelope violation (Read/Glob)`. PreToolUse hook FIRE thật trên subagent → gác vai architect KHÔNG phải sân khấu.
+- tarot `.claude/settings.json` đã swap `bash scripts/architect-guard.sh` → `claude-hooks architect-guard` (tarot P345, PR #630).
+
+## ✅ F-005 — RESOLVED consumer-side (tarot P345)
+
+Marker path `.sos-state/architect-active` (binary) vs `.claude/.architect-active` (bash cũ): tarot orchestrator contract đã dùng `.sos-state/` sẵn → **bash guard tarot ĐANG CHẾT** (đọc `.claude/.architect-active` không ai tạo → 100% allow). Swap sang binary = sửa gác chết. **Convention `.sos-state/` của binary là ĐÚNG**; tarot aligned. F-005 đóng được.
+
+## 📌 Version label — đề nghị bump
+
+`Cargo.toml = 0.8.0` nhưng đã chứa F-004 (commit `86446f1` trong HEAD). Handoff/brief gọi "v0.9.0" → **bump version tag** để consumer pin đúng (tarot reinstall thấy `--version` vẫn 0.8.0, dễ tưởng chưa có F-004).
+
+## ⏳ F-006 — vẫn mở (advisory, low-pri)
+
+tarot mitigate fail-OPEN bằng `scripts/setup-dev.sh` (ép `cargo install`). Đề nghị claude-hooks **document pattern fail-CLOSED wrapper** (`command -v claude-hooks || exit 2`) cho hook stakes cao (vd block-unsafe-merge) — để downstream chọn swap an toàn. tarot hiện GIỮ block-unsafe-merge bash vì lý do này.
+
+---
+
 <!-- Quản đốc: append F-NNN khi gặp ma sát mới. F-001..003 = workflow sos-kit; F-004+ = binary parity-gap/hardening (dogfood + review). Format: triệu chứng → evidence (cite line) → đề xuất fix. -->
