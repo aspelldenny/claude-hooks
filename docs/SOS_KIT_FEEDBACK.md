@@ -1,7 +1,9 @@
 # SOS-Kit Workflow Feedback — từ pilot `claude-hooks`
 
-> **Mục đích:** ghi lại lỗi / mâu thuẫn / ma sát của **workflow sos-kit** (KHÔNG phải bug code claude-hooks) phát hiện trong lúc build, để bê sang `~/sos-kit` xử lý.
-> **Nguồn:** downstream repo `claude-hooks` (adopt sos-kit spine 2026-06-09). Quản đốc (main session) ghi live.
+> **Mục đích:** handoff findings cho upstream xử lý. Hai loại:
+> - **F-001..F-003 — workflow/doctrine sos-kit** (phát hiện lúc build P001-P008): bê sang `~/sos-kit`.
+> - **F-004+ — claude-hooks binary parity-gap** (phát hiện khi dogfood binary vào tarot, phiếu `~/tarot/docs/ticket/P344-adopt-claude-hooks.md`): bê vào `docs/BACKLOG.md` claude-hooks (phiếu fix mới). Đây là bug/gap của binary này, KHÔNG phải workflow.
+> **Nguồn:** downstream repo `claude-hooks` (adopt sos-kit spine 2026-06-09) + dogfood tarot (2026-06-09). Quản đốc ghi live.
 > **Doctrine ref:** `~/sos-kit/docs/WORKFLOW_V2.2.md`.
 
 ---
@@ -67,4 +69,135 @@ Grep tìm `docs/CHANGELOG.md`, nhưng repo này (và CLAUDE.md DOCS GATE) để 
 
 ---
 
-<!-- Quản đốc: append F-NNN khi gặp ma sát workflow mới. Format: triệu chứng → mâu thuẫn → đề xuất fix sos-kit. -->
+---
+
+## F-004 — `architect-guard` binary thiếu Write/Edit branch — mất Write-guard khi swap
+
+**Severity:** HIGH — security guard gap (silent failure)
+**Phát hiện:** P344 CHALLENGE + EXECUTE (2026-06-09), tarot dogfood
+**Loại:** Binary capability gap (binary thiếu feature bash oracle có).
+
+**Triệu chứng:** Khi swap `bash scripts/architect-guard.sh` → `claude-hooks architect-guard`, Write/Edit to `src/`, `CLAUDE.md`, `docs/BACKEND_GUIDE.md`, `CHANGELOG.md` (tất cả ngoài allowlist) **đều exit 0** (ALLOW) thay vì exit 2 (BLOCK). Architect drift không bị chặn.
+
+**Root cause:** `~/claude-hooks/src/hooks/mod.rs` hàm `architect_guard_decide` chỉ nhận `file_path` và pattern. Struct `ToolInput` (io.rs) KHÔNG có `tool_name` field. Không có Write/Edit branch. Binary chỉ guard `Read|Glob` (README:30 đúng).
+
+**Bash oracle behavior (file `scripts/architect-guard.sh`):**
+- `L54-61` `is_allowed_for_write()`: allowlist chỉ `docs/ticket/P*-*.md` (phiếu active)
+- `L109-115` `case Write|Edit`: áp allowlist → block mọi file ngoài phiếu → exit 2
+- `L80-94` `block_write()`: message "Architect không được sửa source/docs/CLAUDE.md"
+
+**Runtime test (P344 CHALLENGE):**
+- Marker `.sos-state/architect-active` present + `Edit CLAUDE.md` → **binary exit 0** (ALLOW — sai)
+- Same + `bash scripts/architect-guard.sh` → **bash exit 2** (BLOCK — đúng)
+
+**Đề xuất fix:** Thêm `tool_name: Option<String>` field vào `ToolInput` struct (io.rs). Trong `architect_guard_decide`: if `tool_name == "Write" | "Edit" | "MultiEdit" | "NotebookEdit"` → apply `is_allowed_for_write()` allowlist (chỉ `docs/ticket/P*-*.md`). Đây là Write-guard THẬT, không phải no-op.
+
+**Impact for tarot P344:** `bash scripts/architect-guard.sh` GIỮ NGUYÊN cho hook này. Sẽ swap khi F-004 fix ở claude-hooks.
+
+---
+
+## F-005 — Thiếu cơ chế fail-CLOSED khi binary vắng PATH
+
+**Severity:** HIGH — merge gate có thể fail-OPEN trên máy mới
+**Phát hiện:** P344 EXECUTE (2026-06-09), anchor #15 analysis
+**Loại:** Binary availability gap (fail-OPEN vs fail-CLOSED semantic mismatch).
+
+**Triệu chứng:** Nếu `claude-hooks` binary không có trên PATH (máy mới chưa chạy `setup-dev.sh`), Claude Code gọi `claude-hooks block-unsafe-merge` → shell exit 127 (command not found). Claude Code treat exit 127 như exit 0 (allow) → `block-unsafe-merge` **fails OPEN** — PR merge không có SECURITY_REVIEW APPROVE vẫn lọt qua.
+
+**Tác động:** `block-unsafe-merge` là fail-CLOSED gate (merge security review). Khi binary vắng → từ fail-CLOSED biến thành fail-OPEN silently. Fail mode hoàn toàn im lặng — không có warning, không có log.
+
+**Đề xuất fix (2 option):**
+- **(A) Shim presence-check:** `setup-dev.sh` cài shim `block-unsafe-merge` → shell wrapper mà:
+  ```bash
+  #!/usr/bin/env bash
+  # Presence-check shim
+  if ! command -v claude-hooks >/dev/null 2>&1; then
+    echo "⛔ BLOCKED: claude-hooks binary not found. Run scripts/setup-dev.sh first." >&2
+    exit 2  # fail-CLOSED
+  fi
+  exec claude-hooks block-unsafe-merge "$@"
+  ```
+  Shim đặt ở `scripts/block-unsafe-merge-shim.sh` → `.claude/settings.json` gọi shim thay vì binary trực tiếp.
+- **(B) claude-hooks self-check PATH:** binary detect nếu mình bị gọi qua stale PATH → print warning + exit 2.
+- **(C) document + setup-dev mitigation** (current tarot approach — giữ bash thay vì swap, vì bash luôn có sẵn). Acceptable nếu fail-CLOSED gate không swap sang binary.
+
+**Impact for tarot P344:** Đây là lý do tarot giữ `bash scripts/block-unsafe-merge.sh` thay vì swap — bash không có FAIL-OPEN gap vì bash luôn có. Sẽ swap khi có cơ chế fail-CLOSED đảm bảo.
+
+---
+
+## F-006 (low) — `session-banner` doc-size check hardcode `docs/CHANGELOG.md`
+
+**Severity:** Low — false-positive warning (không block, gây nhiễu)
+**Phát hiện:** P344 EXECUTE (2026-06-09), tarot dogfood
+**Loại:** Hardcode path assumption lệch repo layout.
+
+**Triệu chứng:** `claude-hooks session-banner` in "doc size warning: docs/CHANGELOG.md (Xk > 40k threshold)". Trong tarot, CHANGELOG ở `docs/CHANGELOG.md` nên khớp. Nhưng nếu repo có CHANGELOG ở root (`CHANGELOG.md`) — lệch F-003 pattern — banner sẽ miss file thật và không warn. Session có false sense of security.
+
+**Confirm tarot:** `docs/CHANGELOG.md` khớp hardcode path → warning fires đúng cho tarot. KHÔNG miss.
+
+**Nhưng nếu repo khác dùng root `CHANGELOG.md`** (như `~/claude-hooks` chính nó — `CHANGELOG.md` ở root, không phải `docs/`): banner miss, không warn → false sense "doc nhỏ, ok".
+
+**Đề xuất fix:** Đọc path từ `.doc-rotate.toml` `changelog_path` (nếu có) thay vì hardcode `docs/CHANGELOG.md`. Fallback: check cả `CHANGELOG.md` (root) + `docs/CHANGELOG.md`. Đồng nhất với F-003 logic.
+
+---
+
+## F-001 — Confirm từ tarot dogfood (P344)
+
+**Status:** CONFIRMED — tarot trực tiếp gặp marker path lệch khi P344 CHALLENGE.
+
+**Confirm detail:** tarot `architect-guard.sh:22` dùng `.claude/.architect-active`. Binary `mod.rs:13` dùng `.sos-state/architect-active`. Tarot xử lý bằng cách giữ bash (vì RISK-1 F-004 đã force giữ bash anyway), nên RISK-3 marker moot cho P344. Nhưng khi F-004 fix → swap architect-guard sang binary → marker path sẽ cần align. Đề xuất: binary docs đã nói `.sos-state/` → orchestrator contract tarot update touch `.sos-state/architect-active` (khi ready). F-001 root cause đúng như mô tả.
+
+## F-004 — `architect-guard` THIẾU nhánh Write/Edit guard (parity-gap vs tarot deployed hook)
+
+**Severity:** HIGH (silent loss of a real security guard nếu swap binary vào tarot)
+**Phát hiện:** dogfood tarot P344 CHALLENGE (2026-06-09), Quản đốc verify trực tiếp
+**Loại:** Binary parity-gap — port dựa trên oracle CŨ/NHỎ hơn bản tarot chạy thật.
+
+**Triệu chứng:** binary `claude-hooks architect-guard` chỉ guard `Read|Glob` (chặn Architect ĐỌC source). Bản `architect-guard.sh` tarot đang deploy **còn guard cả `Write|Edit`** — chặn Architect GHI source/CLAUDE.md/guides, chỉ allowlist `docs/ticket/P*-*.md`.
+
+**Evidence (verified 2026-06-09):**
+- `~/tarot/scripts/architect-guard.sh` = **119 dòng**: có `is_allowed_for_write()` (L54-61, allowlist chỉ `docs/ticket/P*-*.md`, deny `TICKET_TEMPLATE.md`) + `case Write|Edit` (L109-115) gọi `block_write` exit 2.
+- `~/claude-hooks/scripts/architect-guard.sh` (oracle em port từ) = **86 dòng**: CHỈ Read/Glob, KHÔNG có `tool_name`/Write/Edit branch.
+- `src/hooks/mod.rs::architect_guard_decide(file_path, pattern)` — KHÔNG nhận `tool_name`, không có Write/Edit branch. `ToolInput` không có field `tool_name`.
+- Runtime: marker present + `Edit CLAUDE.md` → **binary exit 0** (ALLOW); tarot bash → **exit 2** (BLOCK).
+
+**Root cause:** parity em "verified 8/8" là so với oracle `scripts/architect-guard.sh` CỦA repo claude-hooks (86-dòng) — nhưng đó KHÔNG phải bản tarot deploy (119-dòng, giàu hơn). Scope-drift giữa 2 bản oracle (PROJECT.md đã ghi nhận "vision nhắm 4 hook tarot" nhưng copy oracle lúc adopt là bản cũ hơn).
+
+**Đề xuất fix (claude-hooks BACKLOG — phiếu mới, gọi tạm P010):**
+- Thêm `tool_name` vào `ToolInput` (io.rs) + nhánh Write/Edit trong `architect_guard_decide`: nếu `tool_name ∈ {Write,Edit,MultiEdit}` → áp `is_allowed_for_write` allowlist (chỉ `docs/ticket/P*-*.md`), else block exit 2.
+- Port từ oracle TAROT (119-dòng) làm spec, KHÔNG oracle cũ. Cập nhật `scripts/architect-guard.sh` repo này cho khớp tarot (đồng bộ oracle).
+- `why_blocked` routing đã map `Edit|Write|MultiEdit|NotebookEdit → block_env_edit` — sau fix cần thêm architect_guard cũng nhận Write/Edit (2 hook cùng fire trên Edit/Write ở tarot: architect-guard chặn Architect-ghi-source, block-env-edit chặn .env).
+
+---
+
+## F-005 — Marker path lệch: binary `.sos-state/architect-active` vs tarot bash `.claude/.architect-active`
+
+**Severity:** Medium (architect-guard không fire đúng lúc nếu orchestrator touch sai path)
+**Phát hiện:** dogfood tarot P344 (RISK-3), verified
+**Loại:** Binary ⇄ deployed-env convention mismatch.
+
+**Evidence:**
+- `src/hooks/mod.rs` (+ `scripts/architect-guard.sh:25`): marker = `.sos-state/architect-active`.
+- `~/tarot/scripts/architect-guard.sh:22`: `MARKER_FILE=".claude/.architect-active"`.
+→ Orchestrator tarot `touch .claude/.architect-active` thì binary (tìm `.sos-state/`) KHÔNG thấy → guard không fire.
+
+**Đề xuất fix:** chốt 1 path canonical (sos-kit dùng `.sos-state/` ở các hook khác → binary đúng hướng). Khi adopt tarot: hoặc update orchestrator contract tarot touch `.sos-state/architect-active`, hoặc binary đọc cả 2 path 1 nhịp transition. Quyết ở phiếu adopt (P344 side, resolution A/B/C).
+
+---
+
+## F-006 — FAIL-OPEN GAP: binary vắng PATH làm `block-unsafe-merge` (fail-CLOSED) lại fail-OPEN
+
+**Severity:** Medium-High (gác merge-security câm lặng nếu máy mới chưa cài binary)
+**Phát hiện:** dogfood tarot P344 (anchor #15), reasoning
+**Loại:** Deployment failure-mode (không phải code logic).
+
+**Triệu chứng:** `.claude/settings.json` gọi `claude-hooks block-unsafe-merge`. Nếu binary CHƯA cài (máy mới, `cargo install` chưa chạy) → shell `command not found` → **exit 127** ≠ 2 → Claude Code coi là non-block → ALLOW. Nghịch lý: `block-unsafe-merge` thiết kế fail-CLOSED (gh fail → block), nhưng binary-vắng-PATH lại fail-OPEN ở tầng ngoài (trước cả khi code chạy).
+
+**Đề xuất fix (defense-in-depth):**
+- (a) `scripts/setup-dev.sh` bootstrap ép `cargo install` (P344 Task 3 đã làm phía tarot).
+- (b) Cân nhắc: settings.json wrap `command -v claude-hooks || { echo "BLOCKED: claude-hooks not installed" >&2; exit 2; }` cho riêng hook fail-CLOSED — nhưng đó là deployer concern, không phải binary. Document trong README "Install required; absent binary = merge-gate fails open."
+- (c) README đã có Install section; thêm warning rõ về fail-open-when-absent cho block-unsafe-merge.
+
+---
+
+<!-- Quản đốc: append F-NNN khi gặp ma sát mới. F-001..003 = workflow sos-kit; F-004+ = binary parity-gap (dogfood). Format: triệu chứng → evidence (cite line) → đề xuất fix. -->
