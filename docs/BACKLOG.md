@@ -8,36 +8,24 @@
 
 ---
 
-## 🔥 Active sprint: Phase 1 — Scaffold + core 2 hook
+## 🔥 Active sprint: Phase 4 — Ship
 
-> **Mục tiêu:** dựng CLI 5-subcmd (clap derive) + port 2 hook đơn giản nhất (`architect-guard`, `block-env-edit`) đạt CLI parity với bản Bash.
-> **Kết thúc khi:** `cargo build` clean + `architect-guard` & `block-env-edit` cho cùng exit code + stderr như Bash counterpart trên 100% test fixtures (PROJECT.md Success #1).
-> **Started:** 09/06/2026
-> **Reference Bash (đã copy vào `scripts/` khi adopt — port từ đây, KHÔNG bịa logic):** `scripts/architect-guard.sh` · `scripts/block-env-edit.sh`.
+> **Mục tiêu:** đóng gói + wire bản Rust vào tarot, thay 4 Bash hook gốc.
+> **Kết thúc khi:** README/ARCHITECTURE polish + `cargo publish` dry-run clean + tarot chạy 1h session smoke clean với binary.
+> **Promote:** 2026-06-09 (Phase 1+2+3 đã ship P001–P007, parity-verified — xem Done bên dưới).
 
-- [x] **[P001]** ✅ Scaffold CLI — `clap` derive, 5 subcmd registered (`architect-guard` · `block-env-edit` · `block-unsafe-merge` · `session-banner` · `serve`), stdin JSON parse harness (`serde_json`), exit-code convention (0 allow / 2 block) + stderr reason. **Verify-cò (P057 spirit):** mỗi subcmd stub trả exit hợp lệ + 1 integration test `assert_cmd` xác nhận CLI dispatch nổ. → shipped `b216949` (8/8 test, fail-open parity verified).
-- [x] **[P002]** ✅ `architect-guard` subcmd — port `scripts/architect-guard.sh`: marker gate + forbidden path set + .md allow, exit 0/2 + reason. → shipped `de05a9d` (14/14 test, **parity 8/8 vs Bash oracle** incl. crates/src + ./ strip edges).
-- [x] **[P003]** ✅ `block-env-edit` subcmd — port `scripts/block-env-edit.sh`: block `.env*`, allow `.env.example`, regex `^\.env($|\.)` verbatim (regex::Regex). → shipped `42530a0` (24/24 test, **parity 10/10 vs Bash oracle** incl. .envrc/.environment/notebook fallback).
+- [ ] **[P008]** README + ARCHITECTURE polish + `cargo publish` dry-run. Gồm: fix `serverInfo.name` "rmcp"→"claude-hooks" (MCP get_info default), README usage (CLI 5 subcmd + MCP 5 tools), `cargo publish --dry-run` clean.
+- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean.
 
 ---
 
-## ✅ Phase 2 DONE — Advanced 2 hook
+## ✅ Phase 1+2+3 DONE — 4 hook port + MCP server (P001–P007)
 
-> **Shipped:** P004 block-unsafe-merge + P005 session-banner. Phase 2 complete.
+> **Shipped 2026-06-09 (1 session, end-to-end).** 93/93 test, clippy clean, parity-verified vs Bash oracle. PR #1 (running build). Chi tiết từng phiếu → Recently shipped.
 
-- [x] **[P004]** ✅ `block-unsafe-merge` subcmd — port `scripts/block-unsafe-merge.sh` (137 dòng): `gh pr diff` capture + security-surface regex + APPROVE sentinel check. Lane: Tầng 1 (security-surface). → shipped (28/28 test, fail-CLOSED parity).
-- [x] **[P005]** ✅ `session-banner` subcmd — port `scripts/session-start-banner.sh` (188 dòng): render sprint + advisory staleness + orchestrator contract cho SessionStart. → shipped (27 unit + 4 integration tests, manual epoch Hinnant verified, F-001 verbatim). **→ Phase 2 DONE.**
-
----
-
-## 🌊 Future waves (cam kết low)
-
-- [ ] **Phase 3 — MCP** (`serve` + `why_blocked`)
-  - [ ] **[P006]** `serve` subcmd — `rmcp` stdio JSON-RPC, expose 4 hook above as MCP tools.
-  - [ ] **[P007]** `why_blocked` composite tool — Sếp/Quản đốc gọi `mcp__claude_hooks__why_blocked --tool-call <json>` để debug lý do hook chặn (thay vì đọc Bash sed).
-- [ ] **Phase 4 — Ship**
-  - [ ] **[P008]** README + ARCHITECTURE polish + `cargo publish`.
-  - [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh`. 1h session smoke clean.
+- [x] **Phase 1** — P001 scaffold CLI · P002 architect-guard · P003 block-env-edit. Parity 8/8 + 10/10 vs Bash.
+- [x] **Phase 2** — P004 block-unsafe-merge (fail-CLOSED) · P005 session-banner (render, stdout byte-identical). 
+- [x] **Phase 3** — P006 serve MCP (rmcp stdio + Decision-core refactor + 4 tool) · P007 why_blocked (5th composite tool, routing khớp settings.json). Real handshake verified.
 
 ---
 
@@ -55,6 +43,8 @@
 
 ## ✅ Recently shipped
 
+- ✅ **[P007] why_blocked composite tool** (09/06/2026) — 5th MCP tool, routes tool_name→hook (verbatim settings.json), returns blocked/exit/reason. Commit `c5b3640`. Real handshake: Edit+.env.local→block_env_edit blocked. **→ Phase 3 DONE.**
+- ✅ **[P006] serve MCP server** (09/06/2026) — rmcp 1.7 stdio + Decision-core refactor (4× `_decide` cores, CLI wrappers unchanged) + 4 hook tools. Real JSON-RPC handshake verified. 81 CLI tests unbroken.
 - ✅ **[P005] session-banner port** (09/06/2026) — render hook: BACKLOG sprint block + doc size warn + cleanup nudge + advisory staleness + orchestrator contract. stdout always exit 0. Manual ISO→epoch (Hinnant). F-001 verbatim. 27 unit + 4 integration tests. **→ Phase 2 DONE.**
 - ✅ **[P004] block-unsafe-merge port** (09/06/2026) — gh API + security-surface regex + APPROVE sentinel check. Fail-CLOSED divergence. 22 unit + 4 integration tests. Parity vs Bash.
 - ✅ **[P002] architect-guard port** (09/06/2026) — marker gate + forbidden path set + .md allow. Commit `de05a9d`. Parity 8/8 vs Bash.
