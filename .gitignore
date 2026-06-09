@@ -24,3 +24,6 @@ Thumbs.db
 .sos-state/
 .backup/
 .sos-adopt-incoming/
+
+# sos-kit re-sync staging
+.sos-sync-incoming/

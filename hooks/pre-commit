@@ -187,7 +187,10 @@ CODE_STAGED=$(git diff --cached --name-only --diff-filter=AM | grep -E '\.(py|rs
 PHIEU_STAGED=$(git diff --cached --name-only --diff-filter=AM | grep -E "^${TICKET_DIR}/P[0-9]+-" || true)
 if [ -n "$CODE_STAGED" ] && [ -n "$PHIEU_STAGED" ]; then
     DISCOVERIES_STAGED=$(git diff --cached --name-only --diff-filter=AM | grep -E '^docs/DISCOVERIES\.md$' || true)
-    CHANGELOG_STAGED=$(git diff --cached --name-only --diff-filter=AM | grep -E '^docs/CHANGELOG\.md$' || true)
+    # CHANGELOG lives at root in some repos (sos-kit, claude-hooks), docs/ in others (doc-rotate).
+    # Accept BOTH — hardcoding docs/ gave a false-positive warning every code+phiếu commit and
+    # disagreed with [2/7] docs-gate which reads the root path (F-003 claude-hooks dogfood).
+    CHANGELOG_STAGED=$(git diff --cached --name-only --diff-filter=AM | grep -E '^(docs/)?CHANGELOG\.md$' || true)
     if [ -z "$DISCOVERIES_STAGED" ] || [ -z "$CHANGELOG_STAGED" ]; then
         yellow "  ⚠️  Code + phiếu changed but DISCOVERIES.md or CHANGELOG.md not staged"
         echo "     Definition of Done requires both. Stage them: git add docs/DISCOVERIES.md docs/CHANGELOG.md"

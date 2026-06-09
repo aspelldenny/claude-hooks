@@ -120,12 +120,16 @@ Before EVERY spawn:
 - **After worker returns:** `rm -f .sos-state/worker-active` — close the window so Quản đốc can't hand-code product post-EXECUTE.
 
 Never leave a stale marker. Markers live outside `.claude/` so YOLO mode does not prompt.
-## Background subagent spawns (`run_in_background`)
-Native Claude Code capability (the harness's, not the kit's): spawn a subagent with **`run_in_background: true`** (`Agent`/`Task` tool) → it runs async, you continue, and the harness **re-invokes you with a `task-notification` on completion**. Use it so Chủ nhà isn't blocked on long, independent work.
-- **Background-OK:** ONE approved Worker EXECUTE (Chủ nhà does other things, pinged when done) · read-only specialists (`advisory-watch`, `boundary-check`) that take minutes · independent phiếu on **non-overlapping** surfaces.
-- **Marker safety (LOAD-BEARING):** markers are exclusive (one phase, one marker). At most **ONE guarded agent** (architect OR worker) in flight at a time — two parallel Workers clash on `worker-active` + the same files. Read-only specialists carry no marker → several may run. For a background Worker: keep `worker-active` set WHILE it runs; `rm -f` only on its **completion notification**, NOT right after the spawn call (else the orchestrator-guard window closes mid-EXECUTE).
+## Background subagent spawns (async)
+Native Claude Code capability. A subagent runs **in the background** (async; harness re-invokes the main session with a `task-notification` on completion) via **three mechanisms** (official docs `code.claude.com/docs/en/sub-agents.md`):
+1. **Frontmatter `background: true`** on the agent definition (`.claude/agents/<x>.md`) → that agent runs background **by default every spawn**. This is the kit's chosen default — the 4 spawnable agents (architect/worker/advisory-watch/boundary-check) carry it so Chủ nhà isn't blocked.
+2. **Per-spawn param** on the `Agent`/`Task` tool call (overrides the default for one spawn).
+3. **User says "run in background"** / `Ctrl+B` on a running task.
+(`CLAUDE_CODE_FORK_SUBAGENT=1` forces ALL spawns background regardless.)
+- **⚠️ Permission caveat (LOAD-BEARING — docs lines 697-713):** a **background subagent runs with pre-granted session permissions and AUTO-DENIES any tool call that would otherwise prompt.** Read-only specialists (`advisory-watch`/`boundary-check`) = low risk. **Worker EXECUTE in background = real risk:** any not-pre-approved Bash/Edit mid-build is silently auto-denied → partial/failed EXECUTE. Safe ONLY under bypass-permissions or a comprehensive allowlist (the screenshot Sếp ran had bypass ON). If perms aren't pre-granted, run Worker EXECUTE foreground.
+- **Marker safety (LOAD-BEARING):** markers are exclusive (one phase, one marker). At most **ONE guarded agent** (architect OR worker) in flight — two parallel Workers clash on `worker-active` + the same files. With `background:true` defaults this matters MORE (agents auto-background → easy to accidentally have two in flight). The state machine is sequential (architect DRAFT notification arrives before worker spawn) so normal flow is safe; only parallel-phiếu fan-out risks it. For a background Worker: keep `worker-active` set WHILE it runs; `rm -f` only on its **completion notification**, NOT right after spawn (else orchestrator-guard window closes mid-EXECUTE).
 - **Gate still blocks:** APPROVAL_GATE precedes EXECUTE even when EXECUTE is backgrounded. Background = hands-free, NOT gate-skip.
-- **Never poll:** you are auto-re-invoked on the notification; sleeping/looping to "check" wastes turns. Narrate what's in flight (no silent state) — a 1-line status of running background agents is good practice.
+- **Never poll:** auto-re-invoked on the notification; sleeping/looping to "check" wastes turns. Narrate in-flight background agents (no silent state) — a 1-line status table is good practice.
 ## Phiếu cleanup nudge (P038)
 Banner shows `🧹 Phiếu P<NNN> approved + merged. Run: phieu-done P<NNN>` per matching phiếu — surface to Chủ nhà, MUST NOT auto-run. Spec: `docs/ORCHESTRATION.md` "Phiếu lifecycle".
 ## Invoking skills (Skill tool) (P005)
