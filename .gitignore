@@ -19,3 +19,8 @@ Cargo.lock.bak
 
 # OS
 Thumbs.db
+
+# sos-kit runtime markers
+.sos-state/
+.backup/
+.sos-adopt-incoming/
