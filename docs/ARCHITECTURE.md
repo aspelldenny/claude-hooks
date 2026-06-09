@@ -16,7 +16,7 @@ The binary name is `claude-hooks`; subcommands are kebab-case.
 | `block-env-edit` | `Cmd::BlockEnvEdit` | real (P003) | — |
 | `block-unsafe-merge` | `Cmd::BlockUnsafeMerge` | real (P004) | — |
 | `session-banner` | `Cmd::SessionBanner` | real (P005) | — |
-| `serve` | `Cmd::Serve` | stub (P001) | P006 |
+| `serve` | `Cmd::Serve` | real (P006) | — |
 
 Kebab-case names are auto-derived by clap from PascalCase variants (verified P001: no `#[command(name=...)]` needed for clap 4.6).
 
@@ -51,6 +51,8 @@ Ports `scripts/architect-guard.sh` 1:1. Fires on every `Read`/`Glob` PreToolUse 
 
 **Block message** (stderr, verbatim oracle): `🚫 Architect envelope violation` + path (original, pre-strip) + instructions for Task 0 anchor workflow.
 
+**P006 Decision-core:** `architect_guard_decide(file_path, pattern) -> Decision` contains the marker + path logic. `architect_guard() -> i32` is the thin CLI wrapper (reads stdin, calls `_decide`, prints reason, returns exit_code).
+
 ### `block-env-edit` (P003 — real implementation)
 
 Ports `scripts/block-env-edit.sh` 1:1. Fires on every `Edit`/`Write` PreToolUse call. Guards against secret leak (`.env*` files contain API keys, DB credentials, webhook tokens).
@@ -71,6 +73,8 @@ Ports `scripts/block-env-edit.sh` 1:1. Fires on every `Edit`/`Write` PreToolUse 
 **Exit codes:** `0` (ALLOW), `2` (BLOCK).
 
 **Block message** (stderr, verbatim oracle L46-59): `⛔ BLOCKED: Edit/Write tới <full-path> bị chặn.` + secret-leak rationale + valid alternatives + override instructions.
+
+**P006 Decision-core:** `block_env_edit_decide(file_path, notebook_path) -> Decision`. CLI wrapper: `block_env_edit() -> i32`.
 
 ### `session-banner` (P005 — real implementation)
 
@@ -101,6 +105,8 @@ Ports `scripts/session-start-banner.sh` 1:1. Fires on `SessionStart`. Renders an
 **Bug F-001 (verbatim port, do NOT fix here):** Oracle L178 `Marker:` line is missing `touch .sos-state/worker-active`. Port doctrine requires verbatim copy; fix must go upstream to sos-kit canonical `.sh` + orchestrator.md + ORCHESTRATION.md simultaneously. Text now lives in 2 places: `scripts/session-start-banner.sh` and `src/hooks/mod.rs`.
 
 **Exit codes:** `0` (ALLOW) only — never exits 2.
+
+**P006 Decision-core:** `render_banner() -> String` contains the full render pipeline. CLI wrapper `session_banner() -> i32` calls `print!("{}", render_banner())` + returns ALLOW. F-001 verbatim bug preserved in `render_banner()`.
 
 **Pure helpers (unit-testable, no fs/git/clock):**
 - `find_sprint_block(backlog: &str) -> Option<(String, String, bool)>`
@@ -133,12 +139,57 @@ Ports `scripts/block-unsafe-merge.sh` 1:1. Fires on every `Bash` PreToolUse call
 
 **Exit codes:** `0` (ALLOW), `2` (BLOCK).
 
+**P006 Decision-core:** `block_unsafe_merge_decide(command) -> Decision`. gh-shelling is inside `_decide` (core makes real gh calls). MCP context: gh may fail when serve env differs from hook env → fail-CLOSED returns `blocked=true, reason="gh unavailable"` (honest, NOT fake ALLOW). CLI wrapper: `block_unsafe_merge() -> i32`. Note: override marker returns `Decision { exit_code: ALLOW, blocked: false, reason: Some(warning_msg) }` — CLI wrapper prints warning via eprintln for any non-None reason.
+
 **Security-surface base pattern (oracle L60 — verbatim, do not modify):**
 ```
 src/|schema\.(prisma|sql)|migrations?/|nginx/|docker-compose.*\.yml|Dockerfile|\.env[^.]|middleware\.|lib/auth/|\.claude/agents/security-|docs/security/|scripts/security-gate|scripts/check-(hardcoded|runtime)-secrets|hooks/pre-commit
 ```
 
 **Override marker:** `[security-review-skip:<reason>]` in command → hook logs warning to stderr and allows merge. Intended for docs-only PRs where pattern false-positives.
+
+### `serve` (P006 — real implementation)
+
+MCP server: exposes the 4 hook decision functions as JSON-RPC tools over stdio (rmcp 1.7).
+
+**Decision-core refactor (P006):** all 4 hook functions were refactored to split decision logic from IO.
+Each hook now has two layers:
+
+| Layer | Function | Reads stdin? | Prints? | Returns |
+|---|---|---|---|---|
+| Core (`_decide`) | `architect_guard_decide(file_path, pattern)` | No | No | `Decision { exit_code, blocked, reason }` |
+| CLI wrapper | `architect_guard()` | Yes (`read_payload()`) | Yes (stderr) | `i32` (exit code) |
+| Core | `block_env_edit_decide(file_path, notebook_path)` | No | No | `Decision` |
+| CLI wrapper | `block_env_edit()` | Yes | Yes (stderr) | `i32` |
+| Core | `block_unsafe_merge_decide(command)` | No | No (gh-shelling yes) | `Decision` |
+| CLI wrapper | `block_unsafe_merge()` | Yes | Yes (stderr) | `i32` |
+| Core | `render_banner()` | No | No | `String` (full banner) |
+| CLI wrapper | `session_banner()` | No | Yes (stdout) | `i32` |
+
+`Decision` struct (`src/io.rs`): `{ exit_code: i32, blocked: bool, reason: Option<String> }`. CLI wrappers map to: `eprintln!(reason)` if `Some` + return `exit_code`. MCP tools map to `DecisionOutput { blocked, exit_code, reason }` in JSON.
+
+**CLI parity invariant:** the 81 pre-P006 tests pass unchanged — Decision-core refactor is mechanical (move logic, not change behavior).
+
+**MCP server (`src/serve.rs`):**
+- Struct `HooksServer { tool_router: ToolRouter<Self> }` with `#[tool_router(server_handler)]` macro.
+- 4 `#[tool]` methods (sync): call `*_decide` / `render_banner`, return `Json<DecisionOutput>` / `Json<BannerOutput>`.
+- `run() -> i32`: builds `tokio::runtime::Builder::new_current_thread().enable_all()` runtime, `block_on(HooksServer::new().serve(transport::stdio()).await?.waiting().await)`. Returns `ALLOW` (0) always.
+- rmcp features used: `server`, `transport-io`, `macros`. Macro `#[tool_router(server_handler)]` emits `ServerHandler` impl automatically.
+
+**4 MCP tools:**
+
+| Tool | Input | Output | Behavior |
+|---|---|---|---|
+| `architect_guard` | `{ file_path?, pattern? }` | `DecisionOutput` | Marker gate + forbidden path check (real fs read) |
+| `block_env_edit` | `{ file_path?, notebook_path? }` | `DecisionOutput` | `.env*` check (not `.env.example`) |
+| `block_unsafe_merge` | `{ command? }` | `DecisionOutput` | PR merge check (real gh shell calls, fail-CLOSED) |
+| `session_banner` | `{}` | `{ banner: String }` | Full banner from fs/git state of serve env |
+
+**Transport + framing:** `transport::stdio()` → `(tokio::io::Stdin, tokio::io::Stdout)`. Framing: newline-delimited JSON (one JSON object per line). Client must send `initialize` → `notifications/initialized` → tool calls. Server exits when stdin closes (`waiting()` returns on transport close).
+
+**Tokio runtime:** `new_current_thread().enable_all()`. Cargo.toml tokio features: `rt`, `macros`, `io-std` (no `time` or `rt-multi-thread` needed for rmcp stdio).
+
+**Note:** `.mcp.json` wiring (registering server as MCP provider) is P009/smoke, not P006.
 
 ### stdin-JSON Harness (`src/io.rs`)
 
@@ -171,17 +222,18 @@ Block reason is written to **stderr only** (not stdout). Constants `ALLOW` and `
 ```
 src/
   main.rs        -- clap entry + dispatch (thin)
-  io.rs          -- shared stdin harness + exit constants
+  io.rs          -- shared stdin harness + exit constants + Decision struct
   hooks/
-    mod.rs       -- 4 hook stub functions
-  serve.rs       -- MCP stub (P006 wires rmcp/tokio)
+    mod.rs       -- 4 hooks: *_decide() core + CLI wrapper fn (P006 refactor)
+  serve.rs       -- MCP server: HooksServer + 4 #[tool] methods + tokio runtime
 tests/
-  cli.rs         -- 8 integration tests (assert_cmd)
+  cli.rs         -- 81 integration tests (assert_cmd, CLI parity P002-P005)
+  mcp_handshake.rs -- 5 P006 tests: Decision-core unit + MCP handshake smoke
 ```
 
 ## MCP Surface
 
-`serve` subcommand: stdio JSON-RPC server (rmcp 1.7). P001 = stub only (prints `"serve: not yet implemented (P006)"` to stderr, exits 0). Full implementation in P006: `why_blocked` debug tool for Quản đốc/Sếp sessions.
+`serve` subcommand: stdio JSON-RPC server (rmcp 1.7, P006 real implementation). Exposes 4 hook decision functions as MCP tools. See `serve` section above for full detail. `why_blocked` composite tool = P007 (not in P006 scope).
 
 ## Data Flow
 
@@ -189,13 +241,21 @@ tests/
 Claude Code PreToolUse trigger
   -> claude-hooks <subcmd>  (stdin = JSON payload)
      -> clap parse subcommand
-     -> dispatch to hook fn
-        -> read_payload() [fail-open]
-        -> hook logic (marker gate + path match, or stub ALLOW)
+     -> dispatch to hook fn (CLI wrapper, -> i32)
+        -> read_payload() [fail-open]  (not session-banner)
+        -> *_decide(parsed_inputs) -> Decision  [P006 refactor]
+           -> hook logic (marker gate + path match + gh-shell)
+        -> eprintln!(reason) if Some  [CLI wrapper]
      -> process::exit(code)
+
+MCP path (P006):
+  Claude MCP client -> stdio JSON-RPC
+     -> HooksServer.serve(transport::stdio())
+     -> #[tool] method -> *_decide(params) -> Json<DecisionOutput>
+     -> JSON-RPC response
 ```
 
-`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). Harness wiring unchanged for all 3 block hooks; session-banner does NOT call `read_payload()`.
+`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). `serve` (P006): real MCP server (rmcp 1.7 stdio, 4 hook tools via Decision-core). All hooks refactored to `*_decide + wrapper` pattern (P006).
 
 ## Bash Reference (oracle)
 

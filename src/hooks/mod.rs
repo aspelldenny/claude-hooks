@@ -1,66 +1,49 @@
-use crate::io::{self, ALLOW, BLOCK};
+use crate::io::{self, ALLOW, BLOCK, Decision};
 use regex::Regex;
 
-pub fn architect_guard() -> i32 {
+/// Core: marker gate + forbidden path check. Reads fs (marker + CLAUDE_PROJECT_DIR) but
+/// does NOT read stdin, print, or exit. Returns Decision.
+pub fn architect_guard_decide(file_path: Option<&str>, pattern: Option<&str>) -> Decision {
     // Step 1 — resolve repo root from CLAUDE_PROJECT_DIR (fallback: cwd).
-    // Oracle L23: cd "${CLAUDE_PROJECT_DIR:-<script dir>/..}"
-    // Rust binary has no "script dir" equivalent; cwd is the closest fallback.
-    // Divergence: oracle fallback = script's parent dir; Rust fallback = cwd.
-    // Accepted divergence (CLAUDE.md Port doctrine #7): Claude Code always sets
-    // CLAUDE_PROJECT_DIR when firing hooks, so cwd-fallback is an edge case only.
     let repo_root = std::env::var("CLAUDE_PROJECT_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
     // Step 2 — marker gate. Oracle L28.
-    // If no marker -> not running as Architect -> allow everything.
     let marker = repo_root.join(".sos-state/architect-active");
     if !marker.exists() {
-        return ALLOW;
+        return Decision { exit_code: ALLOW, blocked: false, reason: None };
     }
 
-    // Step 3 — read path from stdin payload. Oracle L38-41.
-    // file_path is priority; fallback to pattern.
-    let payload = io::read_payload();
-    let path = payload.tool_input.file_path.or(payload.tool_input.pattern);
-
-    // Step 4 — no path -> ALLOW (fail-open). Oracle L44.
-    let path = match path {
-        Some(p) => p,
-        None => return ALLOW,
+    // Step 3 — resolve path: file_path priority, fallback to pattern. Oracle L38-41.
+    let path = match file_path.or(pattern) {
+        Some(p) => p.to_owned(),
+        None => return Decision { exit_code: ALLOW, blocked: false, reason: None },
     };
 
-    // Step 5 — strip leading "./". Oracle L47.
+    // Step 4 — strip leading "./". Oracle L47.
     let norm = path.strip_prefix("./").unwrap_or(&path).to_owned();
 
-    // Step 6 — .md anywhere -> ALLOW (docs are Architect's domain). Oracle L50-52.
+    // Step 5 — .md anywhere -> ALLOW (docs are Architect's domain). Oracle L50-52.
     if norm.ends_with(".md") {
-        return ALLOW;
+        return Decision { exit_code: ALLOW, blocked: false, reason: None };
     }
 
-    // Step 7 — forbidden pattern check. Oracle L56-67.
-    // Port semantics: X/* -> starts_with("X/"); */X/* -> contains("/X/"); *.ext -> ends_with(".ext").
-    // __tests__ and build artifacts: prefix-only (no segment variant in oracle).
+    // Step 6 — forbidden pattern check. Oracle L56-67.
     let blocked =
-        // Source dirs — prefix variants (oracle L57: src/*, lib/*, app/*, pkg/*)
         norm.starts_with("src/")
         || norm.starts_with("lib/")
         || norm.starts_with("app/")
         || norm.starts_with("pkg/")
-        // Source dirs — segment variants (oracle L57: */src/*, */lib/*, */app/*, */pkg/*)
         || norm.contains("/src/")
         || norm.contains("/lib/")
         || norm.contains("/app/")
         || norm.contains("/pkg/")
-        // Test dirs — prefix variants (oracle L59: tests/*, test/*, __tests__/*)
         || norm.starts_with("tests/")
         || norm.starts_with("test/")
         || norm.starts_with("__tests__/")
-        // Test dirs — segment variants (oracle L59: */tests/*, */test/*)
-        // NOTE: __tests__ has NO segment variant in oracle L59 — do NOT add contains("/__tests__/")
         || norm.contains("/tests/")
         || norm.contains("/test/")
-        // Build artifacts — prefix only (oracle L61: no segment variants)
         || norm.starts_with("node_modules/")
         || norm.starts_with("target/")
         || norm.starts_with("dist/")
@@ -68,7 +51,6 @@ pub fn architect_guard() -> i32 {
         || norm.starts_with(".next/")
         || norm.starts_with(".nuxt/")
         || norm.starts_with(".svelte-kit/")
-        // Source code extensions (oracle L63)
         || norm.ends_with(".rs")
         || norm.ends_with(".ts")
         || norm.ends_with(".tsx")
@@ -82,48 +64,46 @@ pub fn architect_guard() -> i32 {
         || norm.ends_with(".h")
         || norm.ends_with(".hpp");
 
-    // Step 8 — blocked -> emit message to stderr + return BLOCK. Oracle L69-83.
-    // PATH_ARG in message = original path (pre-strip), matching oracle L73,78.
+    // Step 7 — blocked -> build reason. Oracle L69-83.
     if blocked {
         let msg = format!(
             "🚫 Architect envelope violation\n\nArchitect cannot read source code: {path}\n\nWhat to do instead: write a Task 0 anchor in the phiếu.\nExample:\n  | # | Assumption | Verify by | Result |\n  | 1 | <claim about {path}> | grep ... {path} | ⏳ TO VERIFY |\n\nWorker (separate subagent) will grep-verify it for you. The constraint IS the feature."
         );
-        return io::block(&msg);
+        return Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) };
     }
 
-    ALLOW
+    Decision { exit_code: ALLOW, blocked: false, reason: None }
 }
 
-pub fn block_env_edit() -> i32 {
-    // Step 1 — read stdin payload. Oracle L16-20.
-    // NOTE: env-fallback CLAUDE_TOOL_INPUT (oracle L16-20) intentionally NOT ported.
-    // Hook always receives stdin from Claude Code; env-fallback requires io.rs harness
-    // change (shared API, Tầng 1 scope). See docs/discoveries/P003.md for full rationale.
-    let payload = io::read_payload();
+/// CLI wrapper — hành vi cũ y nguyên (reads stdin, prints stderr, returns exit code).
+pub fn architect_guard() -> i32 {
+    let p = io::read_payload();
+    let d = architect_guard_decide(
+        p.tool_input.file_path.as_deref(),
+        p.tool_input.pattern.as_deref(),
+    );
+    if let Some(ref r) = d.reason { eprintln!("{r}"); }
+    d.exit_code
+}
 
+/// Core: check if editing a .env* file (not .env.example) should be blocked.
+/// Does NOT read stdin, print, or exit. Returns Decision.
+pub fn block_env_edit_decide(file_path: Option<&str>, notebook_path: Option<&str>) -> Decision {
     // Steps 2-4 — parse path: file_path priority, fallback notebook_path (NotebookEdit).
-    // KHÔNG dùng pattern (oracle L29-32: only file_path / notebook_path for this hook).
-    // Empty payload (empty stdin) -> both fields None -> falls through to return ALLOW below.
-    let path = payload.tool_input.file_path
-        .or(payload.tool_input.notebook_path);
-
-    // Step 4 — no path -> ALLOW (fail-open). Oracle L35.
-    let path = match path {
-        Some(p) if !p.is_empty() => p,
-        _ => return ALLOW,
+    let path = match file_path.or(notebook_path) {
+        Some(p) if !p.is_empty() => p.to_owned(),
+        _ => return Decision { exit_code: ALLOW, blocked: false, reason: None },
     };
 
     // Step 5 — basename. Oracle L38: BASE=$(basename "$FILE_PATH").
-    // rsplit('/').next() gives last segment: "/a/b/.env" -> ".env", ".env" -> ".env".
     let base = path.rsplit('/').next().unwrap_or(&path);
 
     // Step 6 — allowlist: .env.example is a template, allow edit. Oracle L41.
     if base == ".env.example" {
-        return ALLOW;
+        return Decision { exit_code: ALLOW, blocked: false, reason: None };
     }
 
     // Step 7 — block regex ^\.env($|\.). Oracle L44.
-    // Pattern is a constant literal -> unwrap() safe (never fails to compile).
     let re = Regex::new(r"^\.env($|\.)").unwrap();
     if re.is_match(base) {
         let msg = format!(
@@ -138,11 +118,21 @@ pub fn block_env_edit() -> i32 {
              \x20 - Tạm rename .env → .env.draft, edit, rename back\n\
              \x20 - Hoặc remove hook khỏi .claude/settings.json (PR review trước)"
         );
-        return io::block(&msg);
+        return Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) };
     }
 
-    // Step 8 — else allow. Oracle L64.
-    ALLOW
+    Decision { exit_code: ALLOW, blocked: false, reason: None }
+}
+
+/// CLI wrapper — reads stdin, calls _decide, prints stderr if blocked, returns exit code.
+pub fn block_env_edit() -> i32 {
+    let payload = io::read_payload();
+    let d = block_env_edit_decide(
+        payload.tool_input.file_path.as_deref(),
+        payload.tool_input.notebook_path.as_deref(),
+    );
+    if let Some(ref r) = d.reason { eprintln!("{r}"); }
+    d.exit_code
 }
 
 // ── P004: block-unsafe-merge helpers (pure, testable without gh) ──────────────
@@ -252,45 +242,40 @@ fn touches_security_surface(files: &str, extra: Option<&str>) -> bool {
         .any(|line| !line.contains(".env.example"))
 }
 
-/// Port of `scripts/block-unsafe-merge.sh`.
+/// Core: check whether a `gh pr merge` command should be blocked.
+/// Makes real gh shell calls (fs/gh per phiếu doctrine). Does NOT read stdin, print, or exit.
+/// FAIL-CLOSED: gh unavailable → blocked=true + reason explaining gh failure.
 ///
-/// DIVERGENCE (INTENTIONAL — fail-CLOSED): when `gh pr diff` fails or returns empty,
-/// this hook returns BLOCK (exit 2), unlike architect-guard / block-env-edit / session-banner
-/// which fail-open (exit 0). This is by design: unverifiable merge of unknown security
-/// surface is treated as unsafe. Do NOT change to fail-open.
-pub fn block_unsafe_merge() -> i32 {
-    // Step 1: read stdin payload, get command. Oracle L24-31.
-    // NOTE: env-fallback CLAUDE_TOOL_INPUT (oracle L24-28) intentionally NOT ported.
-    // Harness always receives stdin from Claude Code; env-fallback is out-of-scope
-    // (same decision as P002/P003 — see docs/discoveries/P003.md).
-    let payload = io::read_payload();
-    let command = match payload.tool_input.command {
-        Some(ref c) if !c.is_empty() => c.clone(),
-        _ => return ALLOW, // oracle L31: empty input → pass through
+/// DIVERGENCE (INTENTIONAL — fail-CLOSED): gh fail or empty diff → BLOCK (exit 2),
+/// unlike other 3 hooks which fail-open. Do NOT change to fail-open.
+pub fn block_unsafe_merge_decide(command: Option<&str>) -> Decision {
+    // Step 1: get command. Oracle L24-31.
+    let command = match command {
+        Some(c) if !c.is_empty() => c.to_owned(),
+        _ => return Decision { exit_code: ALLOW, blocked: false, reason: None },
     };
 
     // Step 2: parse PR number. Oracle L41-47.
     let pr = match parse_merge_pr(&command) {
         Some(n) => n,
-        None => return ALLOW,
+        None => return Decision { exit_code: ALLOW, blocked: false, reason: None },
     };
     let pr_str = pr.to_string();
 
     // Step 3: override marker check. Oracle L50-55.
     if let Some(reason) = extract_skip_marker(&command) {
-        eprintln!(
-            "⚠️  Security review override marker detected for PR #{}. Reason: {}",
+        let msg = format!(
+            "⚠️  Security review override marker detected for PR #{}. Reason: {}\n    Allowing merge. Sếp đã review tay — em (hook) không block.",
             pr_str, reason
         );
-        eprintln!("    Allowing merge. Sếp đã review tay — em (hook) không block.");
-        return ALLOW;
+        // Override = ALLOW but with a warning reason (printed by CLI wrapper via eprintln)
+        return Decision { exit_code: ALLOW, blocked: false, reason: Some(msg) };
     }
 
     // Step 4: read optional extra surface pattern. Oracle L63.
     let extra = std::env::var("SECURITY_SURFACE_EXTRA").ok();
 
     // Step 5: gh call #1 — `gh pr diff <PR> --name-only`. Oracle L67-83.
-    // FAIL-CLOSED: fail or empty output → BLOCK (divergence from other 3 hooks).
     let diff_output = std::process::Command::new("gh")
         .args(["pr", "diff", &pr_str, "--name-only"])
         .output();
@@ -303,8 +288,7 @@ pub fn block_unsafe_merge() -> i32 {
     };
 
     if diff_files.trim().is_empty() {
-        // Oracle L70-82 verbatim message (fail-CLOSED BLOCK)
-        eprintln!(
+        let msg = format!(
             "⛔ BLOCKED: gh pr diff #{pr_str} thất bại (network/auth?).\n\n\
 Em (hook) KHÔNG verify được PR có touch security surface không.\n\
 Fail-safe: block merge để Sếp/Quản đốc kiểm tra tay.\n\n\
@@ -314,16 +298,15 @@ Cách hợp lệ:\n\
   - Nếu confirm KHÔNG touch security surface → re-run merge với marker:\n\
       gh pr merge {pr_str} --merge [security-review-skip:gh-cli-unavailable]"
         );
-        return BLOCK;
+        return Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) };
     }
 
     // Step 6: check security surface. Oracle L86-93.
     if !touches_security_surface(&diff_files, extra.as_deref()) {
-        return ALLOW;
+        return Decision { exit_code: ALLOW, blocked: false, reason: None };
     }
 
     // Step 7: gh call #2 — `gh pr view <PR> --json comments --jq '.comments[].body'`.
-    // Oracle L96: fail → empty string (|| echo ""), NOT fail-closed here.
     let view_output = std::process::Command::new("gh")
         .args(["pr", "view", &pr_str, "--json", "comments", "--jq", ".comments[].body"])
         .output();
@@ -332,17 +315,13 @@ Cách hợp lệ:\n\
         Ok(out) if out.status.success() => {
             String::from_utf8_lossy(&out.stdout).into_owned()
         }
-        _ => String::new(), // oracle L96: fail → empty string
+        _ => String::new(),
     };
 
     // Step 8: verdict check. Oracle L97-137.
     match verdict_is_approve(&comments) {
-        VerdictResult::Approve => {
-            // Oracle L101-102: APPROVE → allow
-            ALLOW
-        }
+        VerdictResult::Approve => Decision { exit_code: ALLOW, blocked: false, reason: None },
         VerdictResult::NeedsReview => {
-            // Oracle L105-116 verbatim message
             let verdict_line = {
                 let marker = "<!-- security-review-start -->";
                 comments
@@ -357,7 +336,7 @@ Cách hợp lệ:\n\
                     })
                     .unwrap_or_default()
             };
-            eprintln!(
+            let msg = format!(
                 "⛔ BLOCKED: PR #{pr_str} touch security surface VÀ /security-review verdict KHÔNG phải APPROVE.\n\n\
 Verdict line: {verdict_line}\n\n\
 Hành động:\n\
@@ -366,13 +345,10 @@ Hành động:\n\
      gh pr merge {pr_str} --merge [security-review-skip:sep-accepted-needs-review]\n\
   3. Nếu cần fix → spawn Worker EXECUTE fix theo INV flagged, push, gate sẽ re-fire"
             );
-            BLOCK
+            Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) }
         }
         VerdictResult::NoBlock => {
-            // Oracle L120-137 verbatim message
-            // Note: oracle L133 has literal `$(gh pr view $PR --json url --jq .url)` in heredoc
-            // (escaped \$ in Bash heredoc = literal text for user to run, NOT executed by hook).
-            eprintln!(
+            let msg = format!(
                 "⛔ BLOCKED: PR #{pr_str} touch security surface NHƯNG chưa có /security-review.\n\n\
 Em (Quản đốc) suýt MISS triệu giám sát. Hook chặn để fix structural — KHÔNG dựa LLM remember.\n\n\
 Hành động:\n\
@@ -386,9 +362,17 @@ Reference:\n\
   - Doctrine: WORKFLOW_V2.2.md §7 Sub-mech A (trigger gap) + §8 (rubric inject)\n\
   - Slash: .claude/commands/security-review.md"
             );
-            BLOCK
+            Decision { exit_code: BLOCK, blocked: true, reason: Some(msg) }
         }
     }
+}
+
+/// CLI wrapper — reads stdin, calls _decide, prints stderr (all reasons: warn + block), returns exit code.
+pub fn block_unsafe_merge() -> i32 {
+    let payload = io::read_payload();
+    let d = block_unsafe_merge_decide(payload.tool_input.command.as_deref());
+    if let Some(ref r) = d.reason { eprintln!("{r}"); }
+    d.exit_code
 }
 
 #[cfg(test)]
@@ -682,59 +666,55 @@ fn doc_size_warns(docs: &[(&str, u64)]) -> Vec<String> {
         .collect()
 }
 
-/// Port of `scripts/session-start-banner.sh` — RENDER hook (stdout, always exit 0).
-///
-/// - Reads file/git state; does NOT read stdin payload (oracle: no `cat` stdin).
-/// - Prints banner to **stdout** (`println!`), NOT stderr. (Opposite of 3 block hooks.)
-/// - **Always returns `ALLOW` (exit 0)** — informational render, never blocks.
-///   Any failure (no BACKLOG, fs error, git fail) → fail-open, silent. This is the
-///   OPPOSITE of `block_unsafe_merge` (fail-CLOSED). Do NOT change to fail-closed.
-pub fn session_banner() -> i32 {
-    // Step 1 — resolve repo root (oracle L17: CLAUDE_PROJECT_DIR fallback script-dir).
-    // Rust: CLAUDE_PROJECT_DIR if set, else cwd. No actual chdir — join all paths to root.
+/// Core: build banner text from fs/git state. Does NOT print or exit.
+/// Any failure (no BACKLOG, fs error, git fail) → returns empty String (fail-open).
+/// F-001 verbatim bug PRESERVED (L178 missing "touch worker-active") — do NOT fix here.
+pub fn render_banner() -> String {
+    // Step 1 — resolve repo root.
     let root = std::env::var("CLAUDE_PROJECT_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
-    // Step 2 — BACKLOG gate (oracle L19-22): no file → exit 0 silent.
+    // Step 2 — BACKLOG gate: no file → empty (silent).
     let backlog_path = root.join("docs/BACKLOG.md");
     let backlog_content = match std::fs::read_to_string(&backlog_path) {
         Ok(s) => s,
-        Err(_) => return ALLOW, // oracle L22: silent
+        Err(_) => return String::new(),
     };
 
-    // Step 3 — find sprint block (oracle L24-51).
+    // Step 3 — find sprint block.
     let (block, header_text, fallback_used) = match find_sprint_block(&backlog_content) {
         Some(t) => t,
-        None => return ALLOW, // oracle L35: no ^## → exit 0 silent
+        None => return String::new(),
     };
 
-    // Step 4 — count items (oracle L55-56).
+    // Step 4 — count items.
     let (open, done) = count_items(&block);
 
-    // Step 5 — print main banner (oracle L58-71). ALL to stdout (println!).
-    // ━ = U+2501. Oracle line has 60 of them (verified from source).
-    println!();
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("🏠 Sếp's project — Active sprint status");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
-    // Oracle L64: echo "$SPRINT_BLOCK" | head -25 (print first 25 lines of block)
+    // Build banner into a String using writeln!-style push_str.
+    let mut out = String::new();
+
+    // Step 5 — main banner.
+    out.push('\n');
+    out.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    out.push_str("🏠 Sếp's project — Active sprint status\n");
+    out.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    out.push('\n');
     for line in block.lines().take(25) {
-        println!("{line}");
+        out.push_str(line);
+        out.push('\n');
     }
-    println!();
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("📊 Active sprint: {open} items đang treo, {done} đã xong");
+    out.push('\n');
+    out.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    out.push_str(&format!("📊 Active sprint: {open} items đang treo, {done} đã xong\n"));
     if fallback_used {
-        // Oracle L69-70: blank + fallback note (escaped quotes around header_text)
-        println!();
-        println!(
-            "📌 Treating \"{header_text}\" as Active sprint (no \"Active sprint\" header found)."
-        );
+        out.push('\n');
+        out.push_str(&format!(
+            "📌 Treating \"{header_text}\" as Active sprint (no \"Active sprint\" header found).\n"
+        ));
     }
 
-    // Step 6 — doc size warnings (oracle L73-92).
+    // Step 6 — doc size warnings.
     {
         let doc_list = [
             "docs/CHANGELOG.md",
@@ -751,18 +731,16 @@ pub fn session_banner() -> i32 {
 
         let warns = doc_size_warns(&sizes);
         if !warns.is_empty() {
-            println!();
-            println!("📏 Doc size warning:");
+            out.push('\n');
+            out.push_str("📏 Doc size warning:\n");
             for w in &warns {
-                // Oracle L91: printf "    %b" — 4-space indent per warn line
-                println!("    {w}");
+                out.push_str(&format!("    {w}\n"));
             }
         }
     }
 
-    // Step 7 — phiếu cleanup nudge (oracle L94-138).
+    // Step 7 — phiếu cleanup nudge.
     {
-        // Oracle L100-104: prefer docs/ticket/, fallback phieu/active/
         let phieu_dir = if root.join("docs/ticket").is_dir() {
             Some(root.join("docs/ticket"))
         } else if root.join("phieu/active").is_dir() {
@@ -772,7 +750,6 @@ pub fn session_banner() -> i32 {
         };
 
         if let Some(pdir) = phieu_dir {
-            // Oracle L108: git branch --merged main — via Command arg-vec, NOT sh -c
             let merged_output = std::process::Command::new("git")
                 .args(["branch", "--merged", "main"])
                 .current_dir(&root)
@@ -782,7 +759,6 @@ pub fn session_banner() -> i32 {
                 Ok(out) if out.status.success() => {
                     String::from_utf8_lossy(&out.stdout)
                         .lines()
-                        // Oracle L108: sed 's/^[* ] //' | tr -d ' '
                         .map(|l| {
                             let stripped = if l.starts_with("* ") || l.starts_with("  ") {
                                 &l[2..]
@@ -794,12 +770,11 @@ pub fn session_banner() -> i32 {
                         .filter(|s| !s.is_empty())
                         .collect()
                 }
-                _ => Vec::new(), // git fail → empty (skip nudge)
+                _ => Vec::new(),
             };
 
             let mut nudges: Vec<String> = Vec::new();
 
-            // Oracle L110-131: loop P*.md, skip TEMPLATE, check approval, check merged
             if let Ok(entries) = std::fs::read_dir(&pdir) {
                 let mut phieu_files: Vec<std::path::PathBuf> = entries
                     .filter_map(|e| e.ok().map(|e| e.path()))
@@ -816,10 +791,9 @@ pub fn session_banner() -> i32 {
                                 .unwrap_or(false)
                     })
                     .collect();
-                phieu_files.sort(); // stable order
+                phieu_files.sort();
 
                 for phieu_path in &phieu_files {
-                    // Oracle L116-120: check "Approved by Chủ nhà:" with non-placeholder value
                     let content = match std::fs::read_to_string(phieu_path) {
                         Ok(s) => s,
                         Err(_) => continue,
@@ -829,7 +803,6 @@ pub fn session_banner() -> i32 {
                         .find(|l| l.contains("Approved by Chủ nhà:"))
                         .unwrap_or("");
 
-                    // Oracle L118-120: skip if contains "[date]" or is empty/placeholder
                     if approved_line.is_empty()
                         || approved_line.contains("[date]")
                         || approved_line.trim_end_matches(|c: char| c.is_whitespace())
@@ -838,7 +811,6 @@ pub fn session_banner() -> i32 {
                         continue;
                     }
 
-                    // Oracle L123: extract phieu_id = ^P[0-9]+ from basename
                     let basename = phieu_path
                         .file_stem()
                         .and_then(|s| s.to_str())
@@ -846,7 +818,6 @@ pub fn session_banner() -> i32 {
                     let phieu_id = {
                         let mut id = String::new();
                         let mut chars = basename.chars();
-                        // Must start with 'P'
                         if chars.next() == Some('P') {
                             id.push('P');
                             for c in chars {
@@ -863,7 +834,6 @@ pub fn session_banner() -> i32 {
                         continue;
                     }
 
-                    // Oracle L127: grep -qE "/${phieu_id}-" in merged branches
                     let pattern = format!("/{phieu_id}-");
                     if merged_branches.iter().any(|b| b.contains(&pattern)) {
                         let slug = basename.to_owned();
@@ -875,53 +845,43 @@ pub fn session_banner() -> i32 {
             }
 
             if !nudges.is_empty() {
-                // Oracle L134-137: blank + header + 4-space indent per nudge
-                println!();
-                println!("🧹 Cleanup nudge:");
+                out.push('\n');
+                out.push_str("🧹 Cleanup nudge:\n");
                 for n in &nudges {
-                    println!("    {n}");
+                    out.push_str(&format!("    {n}\n"));
                 }
             }
         }
     }
 
-    // Step 8 — advisory staleness (oracle L140-171). Only if advisory-inbox.md exists.
+    // Step 8 — advisory staleness.
     {
         let inbox = root.join("docs/security/advisory-inbox.md");
         if inbox.exists() {
             let state_path = root.join("docs/security/.advisory-scan-state");
             if !state_path.exists() {
-                // Oracle L149-151: never scanned
-                println!();
-                println!("🚨 Advisory-watch: chưa scan lần nào — gõ /advisory-scan (first scan)");
+                out.push('\n');
+                out.push_str("🚨 Advisory-watch: chưa scan lần nào — gõ /advisory-scan (first scan)\n");
             } else {
-                // Oracle L153-155: parse last_scan_at from JSON or legacy raw
                 let state_content = std::fs::read_to_string(&state_path).unwrap_or_default();
 
-                // Try JSON pattern: "last_scan_at" : "<value>"
                 let adv_last = {
-                    // Simple regex-free extraction: find `"last_scan_at"` then scan to value
                     let json_key = "\"last_scan_at\"";
                     if let Some(pos) = state_content.find(json_key) {
                         let after = &state_content[pos + json_key.len()..];
-                        // skip whitespace + `:` + whitespace + opening `"`
                         let after = after.trim_start();
                         let after = after.strip_prefix(':').unwrap_or(after).trim_start();
                         if let Some(rest) = after.strip_prefix('"') {
-                            // read until closing `"`
                             let end = rest.find('"').unwrap_or(rest.len());
                             rest[..end].to_owned()
                         } else {
-                            // Legacy raw: entire content trimmed
                             state_content.split_whitespace().collect::<String>()
                         }
                     } else {
-                        // Legacy raw (oracle L155): tr -d '[:space:]'
                         state_content.split_whitespace().collect::<String>()
                     }
                 };
 
-                // Get current epoch for staleness calculation
                 let now_epoch = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
@@ -930,51 +890,49 @@ pub fn session_banner() -> i32 {
                 if let Some(days) = staleness_days(&adv_last, now_epoch) {
                     match staleness_category(days) {
                         Staleness::Critical => {
-                            // Oracle L163-164 verbatim
-                            println!();
-                            println!(
-                                "🚨 Advisory-watch: scan cuối {days} ngày trước (>= 7) — orchestrator BẮT BUỘC auto-spawn advisory-watch (ORCHESTRATION Rule 11)"
-                            );
+                            out.push('\n');
+                            out.push_str(&format!(
+                                "🚨 Advisory-watch: scan cuối {days} ngày trước (>= 7) — orchestrator BẮT BUỘC auto-spawn advisory-watch (ORCHESTRATION Rule 11)\n"
+                            ));
                         }
                         Staleness::Warn => {
-                            // Oracle L166-167 verbatim (2 spaces after ⚠️)
-                            println!();
-                            println!(
-                                "⚠️  Advisory-watch: scan cuối {days} ngày trước — cân nhắc /advisory-scan"
-                            );
+                            out.push('\n');
+                            out.push_str(&format!(
+                                "⚠️  Advisory-watch: scan cuối {days} ngày trước — cân nhắc /advisory-scan\n"
+                            ));
                         }
-                        Staleness::Silent => {
-                            // 0-2 days or negative → no output (oracle: only >=7 and >=3 emit)
-                        }
+                        Staleness::Silent => {}
                     }
                 }
-                // None (parse fail) → no output (oracle: epoch=0 → block skipped L160)
             }
         }
     }
 
-    // Step 9 — Orchestrator contract + Architect Rule 0 (oracle L173-188).
+    // Step 9 — Orchestrator contract + Architect Rule 0.
     // PORT VERBATIM including bug F-001 (L178 missing "touch worker-active").
-    // DO NOT fix F-001 here — fix must go upstream to sos-kit canonical .sh.
-    // Discovery: this text now lives in 2 places (.sh + Rust); sync on upstream fix.
-    println!();
-    println!("🤖 Orchestrator contract (main session — đọc kỹ, ép tuân thủ):");
-    println!("    State machine: DRAFT → CHALLENGE → [RESPOND ⇄ CHALLENGE] → APPROVAL_GATE → EXECUTE");
-    println!("    KHÔNG hỏi user giữa các phase. APPROVAL_GATE là gate DUY NHẤT (trước EXECUTE).");
-    println!("    KHÔNG đẩy đọc phiếu/code về user — Worker CHALLENGE rà & report ≤5 dòng.");
-    println!("    Marker: touch .sos-state/architect-active trước spawn architect; rm -f trước spawn worker.");
-    println!("    Deferred tools MANDATORY (load đầu session, KHÔNG fallback markdown 1/2/3):");
-    println!("        ToolSearch select:AskUserQuestion,TaskCreate,TaskUpdate");
-    println!("    Handbook: agents/orchestrator.md (~85 lines, condensed contract)");
-    println!("    Spec đầy đủ: docs/ORCHESTRATION.md");
-    println!();
-    println!("📌 Architect Rule 0: chỉ viết phiếu cho item trong Active sprint (or first ^## section if absent).");
-    println!("    Idea mới → /idea skill (intake vào BACKLOG.md).");
-    println!("    Pick item hay add idea?");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
+    out.push('\n');
+    out.push_str("🤖 Orchestrator contract (main session — đọc kỹ, ép tuân thủ):\n");
+    out.push_str("    State machine: DRAFT → CHALLENGE → [RESPOND ⇄ CHALLENGE] → APPROVAL_GATE → EXECUTE\n");
+    out.push_str("    KHÔNG hỏi user giữa các phase. APPROVAL_GATE là gate DUY NHẤT (trước EXECUTE).\n");
+    out.push_str("    KHÔNG đẩy đọc phiếu/code về user — Worker CHALLENGE rà & report ≤5 dòng.\n");
+    out.push_str("    Marker: touch .sos-state/architect-active trước spawn architect; rm -f trước spawn worker.\n");
+    out.push_str("    Deferred tools MANDATORY (load đầu session, KHÔNG fallback markdown 1/2/3):\n");
+    out.push_str("        ToolSearch select:AskUserQuestion,TaskCreate,TaskUpdate\n");
+    out.push_str("    Handbook: agents/orchestrator.md (~85 lines, condensed contract)\n");
+    out.push_str("    Spec đầy đủ: docs/ORCHESTRATION.md\n");
+    out.push('\n');
+    out.push_str("📌 Architect Rule 0: chỉ viết phiếu cho item trong Active sprint (or first ^## section if absent).\n");
+    out.push_str("    Idea mới → /idea skill (intake vào BACKLOG.md).\n");
+    out.push_str("    Pick item hay add idea?\n");
+    out.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    out.push('\n');
 
-    // Step 10 — always return ALLOW (exit 0). Render hook: NEVER blocks.
+    out
+}
+
+/// CLI wrapper — prints banner to stdout, always returns ALLOW (exit 0).
+pub fn session_banner() -> i32 {
+    print!("{}", render_banner());
     ALLOW
 }
 

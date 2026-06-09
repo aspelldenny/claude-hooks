@@ -2,6 +2,19 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.6.0 — P006 serve MCP server + Decision-core refactor — 2026-06-09
+
+- **P006**: Implement `serve` subcmd as real MCP server (rmcp 1.7 stdio JSON-RPC). Phase 3 DONE.
+  - **Decision-core refactor** (`src/hooks/mod.rs`): all 4 hook functions split into `*_decide(inputs) -> Decision` (logic, no IO) + thin CLI wrapper (`-> i32`, reads stdin, prints reason, returns exit_code). `Decision { exit_code: i32, blocked: bool, reason: Option<String> }` added to `src/io.rs`. CLI behavior BẮT BIẾN — 81 pre-P006 tests pass unchanged.
+  - **`src/serve.rs`**: `HooksServer { tool_router: ToolRouter<Self> }` with `#[tool_router(server_handler)]` macro (rmcp). 4 `#[tool]` sync methods calling `*_decide`/`render_banner`, returning `Json<DecisionOutput>` / `Json<BannerOutput>`. `run() -> i32`: `tokio::runtime::Builder::new_current_thread().enable_all()` + `block_on(serve(transport::stdio()).waiting())`. Returns ALLOW (0).
+  - **rmcp features added**: `macros` added to rmcp dep in Cargo.toml (was `server`, `transport-io`). Required for `#[tool_router]`/`#[tool]` proc-macros. No new crate added.
+  - **Tokio runtime**: `new_current_thread().enable_all()`. No `time` or `rt-multi-thread` features needed — rmcp stdio does not use tokio timer/multi-thread internally.
+  - **Transport framing**: newline-delimited JSON (rmcp async_rw codec). MCP sequence: `initialize` → `notifications/initialized` → tool calls. Server exits on stdin EOF.
+  - **`io::block` removed**: unused after Decision-core refactor (was `pub fn block(reason: &str) -> i32` in io.rs). `*_decide` functions build reason strings directly; CLI wrappers `eprintln!` them. Not a public API breakage (binary crate).
+  - `tests/mcp_handshake.rs` (new, 5 tests): (a) 4 Decision-core unit tests via CLI shim (architect_guard_decide: no-marker/marker paths; block_env_edit_decide: .env.local block / .env.example allow). (b) 1 MCP handshake smoke: spawn `claude-hooks serve`, write `initialize` + `notifications/initialized` + `tools/list` over stdin, close stdin, assert stdout contains all 4 tool names + `"jsonrpc"` key.
+  - **Total tests: 86** (49 unit + 32 cli.rs + 5 mcp_handshake.rs). Pre-P006 baseline 81 = all pass.
+  - Docs Gate (Tầng 1 — MCP surface + security-surface Decision-core): `docs/ARCHITECTURE.md` — `serve` stub→real; new `serve` section (Decision-core table, MCP tool table, transport/framing, tokio setup, rmcp features); Module Structure + Data Flow updated; per-hook sections updated with Decision-core note.
+
 ## v0.5.0 — P005 session-banner port — 2026-06-09
 
 - **P005**: Port `session-banner` subcmd 1:1 from `scripts/session-start-banner.sh` (188 lines). Render hook: reads file/git state → prints banner to **stdout** → always exit 0. Phase 2 DONE.

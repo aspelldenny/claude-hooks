@@ -45,8 +45,14 @@ pub const ALLOW: i32 = 0;
 /// Exit code 2 = block (reason -> stderr).
 pub const BLOCK: i32 = 2;
 
-/// Block with reason printed to stderr. Returns BLOCK so caller can return it.
-pub fn block(reason: &str) -> i32 {
-    eprintln!("{reason}");
-    BLOCK
+/// Decision separated from IO: hook core returns this — NO print, NO exit, NO stdin read.
+/// CLI wrapper maps to stderr + exit code. MCP tool maps to structured JSON output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decision {
+    /// Exit code: ALLOW (0) or BLOCK (2).
+    pub exit_code: i32,
+    /// true when blocked.
+    pub blocked: bool,
+    /// Stderr message when blocked; None when allowed.
+    pub reason: Option<String>,
 }
