@@ -1,4 +1,4 @@
-// MCP server — rmcp 1.7 stdio JSON-RPC, 4 hook tools (P006).
+// MCP server — rmcp 1.7 stdio JSON-RPC, 5 hook tools (P007: +why_blocked composite router).
 // Decision-core fns live in hooks:: module; this file only maps them to MCP tool output.
 
 use rmcp::{tool_router, tool, ServiceExt, transport};
@@ -30,6 +30,35 @@ struct MergeInput {
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema, Default)]
 struct EmptyInput {}
+
+/// Flat struct — collects all possible tool_input fields; reused across all tool_name branches.
+/// Mirrors the shape of Claude Code PreToolUse payload tool_input.
+#[derive(Deserialize, rmcp::schemars::JsonSchema, Default)]
+struct ToolInputArg {
+    file_path: Option<String>,
+    pattern: Option<String>,
+    notebook_path: Option<String>,
+    command: Option<String>,
+}
+
+/// Mirrors the top-level Claude Code PreToolUse tool-call JSON:
+/// {"tool_name":"Read","tool_input":{"file_path":"src/x.rs"}}
+#[derive(Deserialize, rmcp::schemars::JsonSchema, Default)]
+struct WhyBlockedInput {
+    tool_name: String,
+    #[serde(default)]
+    tool_input: ToolInputArg,
+}
+
+/// Routed decision output — includes which hook fired so the caller knows the routing.
+#[derive(Serialize, rmcp::schemars::JsonSchema)]
+struct WhyBlockedOutput {
+    /// Hook that processed the request: "architect_guard" | "block_env_edit" | "block_unsafe_merge" | "none"
+    hook: String,
+    blocked: bool,
+    exit_code: i32,
+    reason: Option<String>,
+}
 
 // ── Output structs ────────────────────────────────────────────────────────────
 
@@ -90,6 +119,46 @@ impl HooksServer {
     )]
     fn session_banner(&self, Parameters(_): Parameters<EmptyInput>) -> Json<BannerOutput> {
         Json(BannerOutput { banner: hooks::render_banner() })
+    }
+
+    #[tool(
+        name = "why_blocked",
+        description = "Debug router: given a Claude Code PreToolUse tool-call ({tool_name, tool_input}), route to the matching hook by tool_name (per .claude/settings.json matchers) and return which hook fired + its block/allow decision + reason. tool_name with no matching hook returns hook=\"none\", allowed."
+    )]
+    fn why_blocked(&self, Parameters(i): Parameters<WhyBlockedInput>) -> Json<WhyBlockedOutput> {
+        let ti = &i.tool_input;
+        let (hook, d): (&str, crate::io::Decision) = match i.tool_name.as_str() {
+            // Read | Glob → architect_guard (settings.json matcher, anchor #4)
+            "Read" | "Glob" => (
+                "architect_guard",
+                hooks::architect_guard_decide(ti.file_path.as_deref(), ti.pattern.as_deref()),
+            ),
+            // Edit | Write | MultiEdit | NotebookEdit → block_env_edit (anchor #4 — all 4 tool_names)
+            "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => (
+                "block_env_edit",
+                hooks::block_env_edit_decide(ti.file_path.as_deref(), ti.notebook_path.as_deref()),
+            ),
+            // Bash → block_unsafe_merge (anchor #4)
+            "Bash" => (
+                "block_unsafe_merge",
+                hooks::block_unsafe_merge_decide(ti.command.as_deref()),
+            ),
+            // No matching hook → allow, hook="none"
+            other => {
+                return Json(WhyBlockedOutput {
+                    hook: "none".to_string(),
+                    blocked: false,
+                    exit_code: crate::io::ALLOW,
+                    reason: Some(format!("no hook matches tool {other}")),
+                });
+            }
+        };
+        Json(WhyBlockedOutput {
+            hook: hook.to_string(),
+            blocked: d.blocked,
+            exit_code: d.exit_code,
+            reason: d.reason,
+        })
     }
 }
 

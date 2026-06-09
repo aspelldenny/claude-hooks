@@ -2,6 +2,18 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.7.0 — P007 `why_blocked` composite MCP router — 2026-06-09
+
+- **P007**: Add `why_blocked` as 5th MCP tool in `src/serve.rs`. Phase 3 DONE (P006 + P007 complete).
+  - **`why_blocked` composite router**: accepts `{ tool_name, tool_input }` (mirror Claude Code PreToolUse payload shape) → routes `tool_name` to matching hook per `.claude/settings.json` matchers → returns `{ hook, blocked, exit_code, reason }`. One call = full debug answer (which hook fired + block/allow + reason), no need to know hook routing manually.
+  - **Routing (verbatim settings.json matchers):** `Read|Glob` → `architect_guard_decide`; `Edit|Write|MultiEdit|NotebookEdit` → `block_env_edit_decide`; `Bash` → `block_unsafe_merge_decide`; all other tool_names → `hook="none", blocked=false, exit_code=0, reason="no hook matches tool <name>"`.
+  - **New structs in `src/serve.rs`:** `ToolInputArg { file_path?, pattern?, notebook_path?, command? }` (flat, reusable); `WhyBlockedInput { tool_name, tool_input: ToolInputArg }` (`#[serde(default)]` on `tool_input` for fail-open input); `WhyBlockedOutput { hook, blocked, exit_code, reason }`. Derive: `Deserialize + rmcp::schemars::JsonSchema + Default` (input), `Serialize + rmcp::schemars::JsonSchema` (output) — same pattern as 4 P006 structs.
+  - **State-honesty:** `architect_guard` route reads `.sos-state/architect-active` marker from real fs; `block_unsafe_merge` route makes real `gh` shell calls (fail-CLOSED). No mocking — output reflects actual serve environment state.
+  - **No new deps, no Cargo.toml changes.** rmcp/serde already present (P006).
+  - `tests/mcp_handshake.rs` updated: (a) handshake smoke `mcp_serve_tools_list_returns_4_tools` → `_5_tools` (assert `why_blocked` present). (b) 7 new `why_blocked_*` routing tests via MCP `tools/call` (deterministic, no fs/network dependency): `Edit`+`.env.local`→blocked, `Edit`+`.env.example`→allowed, `Write`/`MultiEdit`/`NotebookEdit`+`.env.local`→blocked, `WebFetch`→hook=none, `Bash`+`echo hi`→hook=block_unsafe_merge+allowed.
+  - **Total tests: 93** (49 unit + 32 cli.rs + 12 mcp_handshake.rs). 86 pre-P007 tests pass unchanged.
+  - Docs Gate (Tầng 1 — MCP surface + security-debug): `docs/ARCHITECTURE.md` — serve section: 4→5 tools; added `why_blocked` row to MCP tool table; added routing table (`tool_name → hook`); added state-honesty notes; Module Structure + MCP Surface + Data Flow updated.
+
 ## v0.6.0 — P006 serve MCP server + Decision-core refactor — 2026-06-09
 
 - **P006**: Implement `serve` subcmd as real MCP server (rmcp 1.7 stdio JSON-RPC). Phase 3 DONE.

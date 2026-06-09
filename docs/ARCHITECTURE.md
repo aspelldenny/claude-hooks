@@ -148,9 +148,9 @@ src/|schema\.(prisma|sql)|migrations?/|nginx/|docker-compose.*\.yml|Dockerfile|\
 
 **Override marker:** `[security-review-skip:<reason>]` in command → hook logs warning to stderr and allows merge. Intended for docs-only PRs where pattern false-positives.
 
-### `serve` (P006 — real implementation)
+### `serve` (P006/P007 — real implementation)
 
-MCP server: exposes the 4 hook decision functions as JSON-RPC tools over stdio (rmcp 1.7).
+MCP server: exposes the 4 hook decision functions + 1 composite router as JSON-RPC tools over stdio (rmcp 1.7).
 
 **Decision-core refactor (P006):** all 4 hook functions were refactored to split decision logic from IO.
 Each hook now has two layers:
@@ -172,11 +172,11 @@ Each hook now has two layers:
 
 **MCP server (`src/serve.rs`):**
 - Struct `HooksServer { tool_router: ToolRouter<Self> }` with `#[tool_router(server_handler)]` macro.
-- 4 `#[tool]` methods (sync): call `*_decide` / `render_banner`, return `Json<DecisionOutput>` / `Json<BannerOutput>`.
+- 5 `#[tool]` methods (sync): 4 direct hook wrappers (P006) + 1 composite router `why_blocked` (P007).
 - `run() -> i32`: builds `tokio::runtime::Builder::new_current_thread().enable_all()` runtime, `block_on(HooksServer::new().serve(transport::stdio()).await?.waiting().await)`. Returns `ALLOW` (0) always.
 - rmcp features used: `server`, `transport-io`, `macros`. Macro `#[tool_router(server_handler)]` emits `ServerHandler` impl automatically.
 
-**4 MCP tools:**
+**5 MCP tools:**
 
 | Tool | Input | Output | Behavior |
 |---|---|---|---|
@@ -184,6 +184,27 @@ Each hook now has two layers:
 | `block_env_edit` | `{ file_path?, notebook_path? }` | `DecisionOutput` | `.env*` check (not `.env.example`) |
 | `block_unsafe_merge` | `{ command? }` | `DecisionOutput` | PR merge check (real gh shell calls, fail-CLOSED) |
 | `session_banner` | `{}` | `{ banner: String }` | Full banner from fs/git state of serve env |
+| `why_blocked` | `{ tool_name, tool_input? }` | `WhyBlockedOutput` | Composite router: routes by tool_name → fires matching hook (P007) |
+
+**`why_blocked` composite router (P007):**
+
+Accepts the full PreToolUse tool-call shape `{"tool_name":"Read","tool_input":{"file_path":"src/x.rs"}}` and routes to the matching hook based on `tool_name`, mirroring `.claude/settings.json` PreToolUse matchers. Returns `{ hook, blocked, exit_code, reason }`.
+
+**Routing table (verbatim `.claude/settings.json` matchers):**
+
+| `tool_name` | Hook fired | Decision fn called |
+|---|---|---|
+| `Read`, `Glob` | `architect_guard` | `architect_guard_decide(file_path, pattern)` |
+| `Edit`, `Write`, `MultiEdit`, `NotebookEdit` | `block_env_edit` | `block_env_edit_decide(file_path, notebook_path)` |
+| `Bash` | `block_unsafe_merge` | `block_unsafe_merge_decide(command)` |
+| any other | `none` | — (returns `blocked=false, exit_code=0`) |
+
+**State-honesty notes:**
+- `architect_guard` route reads `.sos-state/architect-active` marker from the fs of the environment where `serve` runs. If serve runs outside an architect-active context (marker absent), `Read`/`Glob` will return ALLOW — this is correct and honest behavior. Callers should be aware of this when using `why_blocked` for debug.
+- `block_unsafe_merge` route makes real `gh` shell calls and is fail-CLOSED. If the serve environment lacks `gh` auth or network access, `Bash + gh pr merge <N>` commands will return `blocked=true, reason="gh unavailable"`. This is intentional — honest, not fake ALLOW.
+- `session_banner`/`render_banner` is NOT routed by `why_blocked` — banner is not a block/allow decision. Any tool_name that would map to banner falls through to the `none` branch (allowed).
+
+**Output struct `WhyBlockedOutput`:** `{ hook: String, blocked: bool, exit_code: i32, reason: Option<String> }`. `hook` = `"architect_guard" | "block_env_edit" | "block_unsafe_merge" | "none"`.
 
 **Transport + framing:** `transport::stdio()` → `(tokio::io::Stdin, tokio::io::Stdout)`. Framing: newline-delimited JSON (one JSON object per line). Client must send `initialize` → `notifications/initialized` → tool calls. Server exits when stdin closes (`waiting()` returns on transport close).
 
@@ -225,15 +246,15 @@ src/
   io.rs          -- shared stdin harness + exit constants + Decision struct
   hooks/
     mod.rs       -- 4 hooks: *_decide() core + CLI wrapper fn (P006 refactor)
-  serve.rs       -- MCP server: HooksServer + 4 #[tool] methods + tokio runtime
+  serve.rs       -- MCP server: HooksServer + 5 #[tool] methods + tokio runtime (P007: +why_blocked)
 tests/
   cli.rs         -- 81 integration tests (assert_cmd, CLI parity P002-P005)
-  mcp_handshake.rs -- 5 P006 tests: Decision-core unit + MCP handshake smoke
+  mcp_handshake.rs -- 12 tests: Decision-core unit + MCP handshake smoke (5-tool assert, P007 routing)
 ```
 
 ## MCP Surface
 
-`serve` subcommand: stdio JSON-RPC server (rmcp 1.7, P006 real implementation). Exposes 4 hook decision functions as MCP tools. See `serve` section above for full detail. `why_blocked` composite tool = P007 (not in P006 scope).
+`serve` subcommand: stdio JSON-RPC server (rmcp 1.7). Exposes 5 MCP tools: 4 direct hook wrappers (P006) + `why_blocked` composite router (P007). See `serve` section above for full detail including routing table and state-honesty notes.
 
 ## Data Flow
 
@@ -255,7 +276,7 @@ MCP path (P006):
      -> JSON-RPC response
 ```
 
-`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). `serve` (P006): real MCP server (rmcp 1.7 stdio, 4 hook tools via Decision-core). All hooks refactored to `*_decide + wrapper` pattern (P006).
+`architect-guard` (P002): real logic. `block-env-edit` (P003): real logic. `block-unsafe-merge` (P004): real logic (gh-shelling, fail-CLOSED). `session-banner` (P005): real logic (render from fs/git state, no stdin, stdout, always exit 0). `serve` (P006): real MCP server (rmcp 1.7 stdio, 4 hook tools via Decision-core). `why_blocked` (P007): composite router tool — routes tool_name → matching `*_decide` per `.claude/settings.json` matchers. All hooks refactored to `*_decide + wrapper` pattern (P006). Phase 3 DONE (P006 + P007).
 
 ## Bash Reference (oracle)
 
