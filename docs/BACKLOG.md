@@ -15,7 +15,8 @@
 > **Promote:** 2026-06-09 (Phase 1+2+3 đã ship P001–P007, parity-verified — xem Done bên dưới).
 
 - [x] **[P008]** ✅ README + ARCHITECTURE polish + ship prep. → shipped `20b455f`: serverInfo "rmcp"→"claude-hooks" (explicit ServerHandler), README usable, version 0.1.0→0.8.0, package 778KB→148KB, `cargo publish --dry-run` clean. 93/93 test.
-- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean. **⏸ BLOCKED on Sếp: (1) merge PR #1 (gated), (2) cross-repo deploy decision.**
+- [x] **[P010]** ✅ `architect-guard` TRUE parity tarot (fix **F-004**) — tool_name dispatch + Write/Edit guard (allowlist `docs/ticket/P*-*.md`, deny `TICKET_TEMPLATE.md`) + Read/Glob superset (prisma/sql/path) + 2 message + sync oracle. → shipped `86446f1` (104 test, **parity 12/12 vs tarot bash oracle**). Marker GIỮ `.sos-state/` (F-005 defer).
+- [ ] **[P009]** Wire tarot — replace `tarot/scripts/{architect-guard,block-env-edit,block-unsafe-merge,session-start-banner}.sh` bằng `claude-hooks <subcmd>` trong `tarot/.claude/settings.json`. 1h session smoke clean. **⏸ BLOCKED on Sếp: (1) merge PR #1 (gated), (2) cross-repo deploy decision. P010 nên xong trước (true parity architect-guard).**
 
 ---
 
@@ -43,6 +44,7 @@
 
 ## ✅ Recently shipped
 
+- ✅ **[P010] architect-guard TRUE parity tarot** (09/06/2026) — fix F-004 (dogfood): tool_name dispatch + Write/Edit guard + prisma/sql superset + sync oracle. Commit `86446f1`. Parity 12/12 vs tarot 119-line bash. Binary giờ thay được architect-guard tarot.
 - ✅ **[P007] why_blocked composite tool** (09/06/2026) — 5th MCP tool, routes tool_name→hook (verbatim settings.json), returns blocked/exit/reason. Commit `c5b3640`. Real handshake: Edit+.env.local→block_env_edit blocked. **→ Phase 3 DONE.**
 - ✅ **[P006] serve MCP server** (09/06/2026) — rmcp 1.7 stdio + Decision-core refactor (4× `_decide` cores, CLI wrappers unchanged) + 4 hook tools. Real JSON-RPC handshake verified. 81 CLI tests unbroken.
 - ✅ **[P005] session-banner port** (09/06/2026) — render hook: BACKLOG sprint block + doc size warn + cleanup nudge + advisory staleness + orchestrator contract. stdout always exit 0. Manual ISO→epoch (Hinnant). F-001 verbatim. 27 unit + 4 integration tests. **→ Phase 2 DONE.**
