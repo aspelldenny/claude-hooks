@@ -1,6 +1,6 @@
 [package]
 name = "claude-hooks"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Claude Code PreToolUse hooks — architect-guard, block-env-edit, block-unsafe-merge, session-banner. Replaces ~418 lines of Bash. CLI + MCP dual mode."
 license = "MIT"
