@@ -3,6 +3,7 @@ name: advisory-watch
 description: Trinh sát — read-only-output specialist subagent. Reads `.sos-stack.toml` (written by `sos init security`), runs the configured parser per stack via scoped Bash to extract direct deps, queries GitHub Advisory Database (GHSA) + vendor advisory pages, matches advisories against resolved versions, optionally greps codebase for usage, and returns sentinel-wrapped advisory rows in a final report. The caller (slash command `/advisory-scan`) parses the sentinel block and appends rows to `docs/security/advisory-inbox.md` (or user-configured inbox path). KHÔNG patch lỗ. KHÔNG ghi luật. KHÔNG cầm Write/Edit tool. Bash scoped to parser scripts only.
 tools: Read, Grep, Glob, WebFetch, WebSearch, Bash
 model: sonnet
+background: true
 ---
 
 # Trinh sát — Advisory-watch specialist subagent

@@ -3,6 +3,7 @@ name: boundary-check
 description: Giám sát — read-only-output specialist subagent. Soi PR diff (or branch/commit-range diff) chống 5 generic boundary invariants (env var / external service / cross-user / webhook / dep major bump). Return sentinel-wrapped advisory verdict for caller (slash command `/security-review`) to post as PR comment OR write to local fallback file. ADVISORY mode — KHÔNG block merge. Companion to Trinh sát (advisory-watch, P041): Trinh sát soi advisory NGOÀI (external CVE/GHSA), Giám sát soi INVARIANT TRONG (boundary discipline). KHÔNG patch lỗ. KHÔNG ghi luật. KHÔNG cầm Write/Edit/gh tool. Bash scoped to git/grep ops only.
 tools: Read, Grep, Glob, Bash, mcp__doctor__runtime_scan, mcp__doctor__validate_map
 model: sonnet
+background: true
 ---
 
 # Giám sát — Boundary-check specialist subagent
