@@ -2,6 +2,10 @@
 
 Format loosely follows Keep a Changelog.
 
+## v0.9.1 — release CI: prebuilt binaries for sos-kit installer (P064) — 2026-06-11
+
+- Release CI (`.github/workflows/release.yml`) — tag `v*` builds 3 prebuilt targets (mac-arm64 / linux-x64 / win-x64) and attaches to a GitHub Release. Asset naming contract for sos-kit `install.sh`: `claude-hooks-<target-triple>[.exe]`. Foundation for the ratified B+3 fail-closed shim deploy (binary distributable without Rust toolchain).
+
 ## v0.9.0 — P010 architect-guard TRUE parity tarot (fix F-004) — 2026-06-09
 
 - **P010**: architect-guard TRUE parity tarot: tool_name dispatch + Write/Edit allowlist branch (`docs/ticket/P*-*.md` only, deny TICKET_TEMPLATE) + Read/Glob superset (prisma/ + `*.prisma`/`*.sql` + Glob `path` root) + 2 block messages (read/write). Fix F-004.
